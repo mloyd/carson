@@ -7,15 +7,28 @@ More information can be found at https://github.com/mloyd/carson
 
 # flake8: noqa
 
+__title__ = 'carson'
+__version__ = '0.0.2'
+
+__summary__ = 'An asyncio package to interact the Tesla JSON web service'
+__uri__ = 'https://github.com/mloyd/carson'
+__author__ = 'Michael Loyd'
+__email__ = 'michael@loyd.org'
+
+__license__ = 'MIT'
+__copyright__ = "Copyright 2020 %s" % __author__
+
 from .core import Session
 from .core import VehicleStateError
 from .core import TeslaSessionError
 from . import stream
 from . import logging
 
+
 __ALL__ = [
-    'Session', 'VehicleStateError', 'TeslaSessionError',
-    'stream', 'logging'
+    '__title__', '__version__', '__summary__', '__uri__', '__author__',
+    '__email__', '__license__', '__copyright__',
+    'Session', 'VehicleStateError', 'TeslaSessionError', 'stream', 'logging'
 ]
 
 

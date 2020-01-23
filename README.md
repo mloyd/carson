@@ -33,7 +33,7 @@ dependencies.  The former should be usable by anyone.  The later runs on Windows
 
 With its most basic usage, you can use `carson` to get the current state of car with the following code:
 
-```
+```python
 >>>import asyncio
 >>>from carson import Session
 >>>async def main():
@@ -47,12 +47,12 @@ Dark Nebula is 'asleep'
 ```
 
 Or you can run it from the command line in a similar fashion:
-```
+```console
 > python -m carson -v --email nikola@tesla.com --password electricity --display-name "Dark Nebula"
 ```
 
 To get a sense of what is happening, you can add verbose and see the requests being made.
-```
+```console
 > python -m carson -v --email nikola@tesla.com --password electricity --display-name "Dark Nebula"
 2020-01-01 10:45:59,418 D carson  Performing OAuth password grant for email='nikola@tesla.com'
 2020-01-01 10:46:00,229 D carson  Req# 1:  Method=POST url='https://owner-api.teslamotors.com/oauth/token?grant_type=password' status=200 duration=0:00:00.810031
@@ -75,12 +75,12 @@ token should resemble a long list of characters similar to the following:
 `0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b`
 
 Example:
-```
+```console
 > python -m carson --auth-token 0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b
 ```
 
 Example:
-```
+```python
 ...
 async with Session(auth_token='0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b') as session:
 ...
@@ -94,6 +94,10 @@ Credentials can also be stored in configuration.  `carson` looks for credentials
 2.  The argument `access_token` passed to the `Session` constructor.
 3.  The environment variables `CARSON_EMAIL`, `CARSON_PASSWORD`, `CARSON_ACCESS_TOKEN`.
 4.  An `.ini` style config file named `.carson` or `carson.ini` in the user's home directory.
+
+> **Regarding credentials:** Always use care when storing credentials.  Sometimes
+> [bad things](https://www.diogomonica.com/2017/03/27/why-you-shouldnt-use-env-variables-for-secret-data/)
+> can happen and often time will.
 
 ### Credential Precedence
 
@@ -113,14 +117,14 @@ _'if not'_, think Python boolean operations (e.g. `''`, `None`, `0` are all `Fal
 Tesla provides a `websocket` endpoint from which telemetry data can be streamed and stored.  To begin streaming this
 telemetry, issue the following command.
 
-```
+```console
 > python -m carson -v --display-name YOUR_CAR_NAME --stream
 ```
 
 `carson` will attempt to _wake-up_ the car and initiate the streaming telemetry.  By default, the telemetry simply
 outputs the data to log.  A sample of that output is below.
 
-```
+```console
 2020-01-01 14:09:30,129 D carson  Req# 1:  Method=GET url='https://owner-api.teslamotors.com/api/1/vehicles' status=200 duration=0:00:00.435516
 2020-01-01 14:09:30,752 D carson  Req# 2:  Method=POST url='https://owner-api.teslamotors.com/api/1/vehicles/01234567890123456/wake_up' status=200 duration=0:00:00.614805
 2020-01-01 14:09:30,752 D carson  Waiting for car to wake up.
@@ -159,7 +163,7 @@ command line.
 ### Recursive Dot-Notation
 
 Consider this JSON response from Tesla when getting making a call to `vehicle_data`:
-```
+```json
 {
   "response": {
     "id": 98765432109876543,
@@ -183,7 +187,7 @@ Consider this JSON response from Tesla when getting making a call to `vehicle_da
 With `carson`, after you make the call to get the vehicle data, you can access the JSON response that is returned, or
 simply reference its associated JSON path on the instance of the `Vehicle` using standard Python dot-notation like this:
 
-```
+```python
 car = await my_session.vehicles('Dark Nebula')
 json_response = await car.vehicle_data()
 
@@ -207,14 +211,14 @@ return an `await`able coroutine.  For example, the `Vehicle` class in `carson` d
 `api/1/vehicles/{vehicle_id}/command/charge_start`.  This makes it possible to start charging your Tesla with either
 this code:
 
-```
+```python
 car = await my_session.vehicles('Dark Nebula')
 await car.start_charge()
 ```
 
 or this command
 
-```
+```console
 > python -m carson -v --command start_charge
 2020-01-01 11:51:44,349 D carson  Req# 1:  Method=GET url='https://owner-api.teslamotors.com/api/1/vehicles' status=200 duration=0:00:02.460019
 2020-01-01 11:51:44,350 I carson  Vehicle('Dark Nebula' state='online')
@@ -252,12 +256,22 @@ body {
 body header:first-child {
   display: none;
 }
-a {
+blockquote {
+  margin: 0;
+  padding: 0 1em;
+  color: rgba(92, 94, 98, 0.7);
+  border-left: .25em solid #dfe2e5;
+  font-size: 0.85rem;
+}
+blockquote strong {
+  font-style: italic;
+}
+a:not(.sourceLine) {
   color: rgb(92, 94, 98);
   text-decoration: none;
   box-shadow: 0 1px 0 0 rgba(92, 94, 98, 0.5);
 }
-a:hover {
+a:not(.sourceLine):hover {
   transition: box-shadow 100ms cubic-bezier(.5,.25,.25,.75),color 100ms cubic-bezier(.5,.25,.25,.75);
   box-shadow: 0 2px 0 0 rgba(92, 94, 98, 0.3);
   /* offset-x | offset-y | blur-radius | spread-radius | color */

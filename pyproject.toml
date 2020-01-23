@@ -1,0 +1,25 @@
+[build-system]
+requires = ["flit_core >=2,<3"]
+build-backend = "flit_core.buildapi"
+
+[tool.flit.metadata]
+module = "carson"
+author = "Michael Loyd"
+author-email = "michael@loyd.org"
+home-page = "https://github.com/mloyd/carson"
+requires = [
+    "aiohttp >= 3.6.2"
+]
+requires-python = ">= 3.8"
+description-file = "README.md"
+classifiers = [
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[tool.flit.metadata.requires-extra]
+test = [
+    "moviepy >= 1.0.1",
+]

@@ -1,7 +1,6 @@
 
 import argparse
 import asyncio
-from pprint import pformat
 from datetime import datetime, timedelta
 from . import logging, Session, VehicleStateError, TeslaSessionError
 
