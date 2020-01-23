@@ -1,0 +1,16 @@
+
+# Temporary directories
+__pycache__
+build
+dist
+tmp
+
+# Environments
+venv*
+.venv
+
+# Misc
+.DS_Store
+
+# Editors
+.vscode

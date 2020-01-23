@@ -1,0 +1,6 @@
+# https://aiohttp.readthedocs.io/en/stable/
+aiohttp >= 3.6.2
+
+# The dashcam module will be coming later.
+# http://zulko.github.io/moviepy/
+# moviepy >= 1.0.1
