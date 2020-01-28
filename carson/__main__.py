@@ -91,6 +91,7 @@ async def start_streaming(car, wake):
     state = car.state
     user_present = False
     is_charging = False
+    in_sentry = False
 
     sleep_multiplier = 1
     # If the car is online, but there is no user (a.k.a driver) present, this multiplier will slowly
@@ -102,14 +103,17 @@ async def start_streaming(car, wake):
         await car.data()
         user_present = car.vehicle_state.is_user_present
         is_charging = car.is_charging
+        in_sentry = car.vehicle_state.sentry_mode
 
     while True:
         data_points = None
         if not user_present:
-            msg = 'Car is charging.' if is_charging else 'No user present.'
+            msg = 'No user present.'
+            if in_sentry:
+                msg = 'Car in sentry mode.'
+            elif is_charging:
+                msg = 'Car is charging.'
             logging.debug('Console stream pass.  %s', msg)
-            if is_charging:
-                logging.debug('%r', car)
         else:
             iterations += 1
             sleep_multiplier = 1
@@ -143,7 +147,8 @@ async def start_streaming(car, wake):
                 await car.data()
                 user_present = car.vehicle_state.is_user_present
                 is_charging = car.is_charging
-                if not user_present and not is_charging:
+                in_sentry = car.vehicle_state.sentry_mode
+                if not user_present and not is_charging and not in_sentry:
                     sleep_multiplier *= 2
             else:
                 sleep_multiplier = 1
