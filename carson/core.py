@@ -312,7 +312,7 @@ class Session:
 
         return await self._session.ws_connect(*args, **kwargs)
 
-    async def request(self, method, path, data=None, retries=0):
+    async def request(self, method, path, data=None, attempts=1):
 
         if not self._session or self._session.closed:
             # If we don't have a session, create an instance using an access
@@ -349,15 +349,15 @@ class Session:
             # anything other than an empty string.
         }
 
-        # Sometimes we get routine upstream errors from the mothership.  As a
-        # convenience, the `retries` param can be set to a positive integer to
-        # retry.  This includes any HTTP status code >= 500 or 408 timeout.
+        # Sometimes we get routine upstream errors from the mothership.  As a convenience, the
+        # `attempts` param can be increased when HTTP status code >= 500 or 408 timeout is
+        # encountered.
         # TODO: Make configurable by HTTP status code?
-        if not isinstance(retries, int) or retries < 0:
-            retries = 0
-        retries = min(retries, 20)
+        if not isinstance(attempts, int) or attempts < 1:
+            attempts = 1
+        attempts = min(attempts, 20)
         logmsg = ''
-        for attempt in range(retries + 1):
+        for attempt in range(1, attempts + 1):
             self._request_count += 1
 
             rstart = 0
@@ -366,8 +366,8 @@ class Session:
                 rstart = self.timer()
                 rstop = rstart
                 logmsg = f'Req# {self._request_count:,}'
-                if attempt:
-                    logmsg += f' (retry #{attempt:,} of {retries:,} total attempts)'
+                if attempt > 1:
+                    logmsg += f' (attempt #{attempt:,} of {attempts:,})'
                 logmsg += f':  Method={method} url={url!r}'
                 if data:
                     logmsg += f' data={_masked_debug(data)!r}'
@@ -430,14 +430,14 @@ class Session:
 
             # We will re-try a 408 and anything in the 500s.
             if resp.status == 408 or resp.status >= 500:
-                if retries:
+                if attempts > 1:
                     logmsg = 'Received status code {} on attempt {:,} of {:,}.'
-                    logargs = [resp.status, attempt + 1, retries]
+                    logargs = [resp.status, attempt, attempts]
                 else:
                     logmsg = 'Received status code {}.'
                     logargs = [resp.status]
 
-                if attempt < retries:
+                if attempt < attempts:
                     logmsg += ' Sleeping {:.2f} before retry.  Content-Type={!r} txt={!r}'
 
                     sleep = 1.00784 * 3.141592653589793 * (attempt + 1)
@@ -733,11 +733,11 @@ class Vehicle(object):
         if self.state not in('online', 'wakeup'):
             raise VehicleStateError('Car is not online.', state=self.state)
 
-        retries = 20 if self.state == 'wakeup' else 3
+        attempts = 20 if self.state == 'wakeup' else 3
         # If we are waking up, try more than if we are just 'online' because we
         # could have gone back to sleep.
 
-        jdata = await self._session.request('GET', f'/api/1/vehicles/{self.id}/vehicle_data', retries=retries)
+        jdata = await self._session.request('GET', f'/api/1/vehicles/{self.id}/vehicle_data', attempts=attempts)
         status = jdata.get('status')
         if status == 200:
             data.record_vehicle_status(jdata)
