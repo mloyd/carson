@@ -357,7 +357,8 @@ class Waypoint:
 
     @staticmethod
     def _parse_int(val, minimum=None, maximum=None):
-        return Waypoint._parse_numeric(int, val, minimum, maximum)
+        fval = Waypoint._parse_numeric(float, val, minimum, maximum)
+        return int(fval) if fval is not None else fval
 
     @staticmethod
     def _parse_str(val, *args):
