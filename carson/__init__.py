@@ -1,16 +1,15 @@
 
-"""
-carson - An asyncio package to interact the Tesla JSON web service
-
-More information can be found at https://github.com/mloyd/carson
-"""
+"""An asyncio package to interact with the Tesla JSON web service."""
 
 # flake8: noqa
 
 __title__ = 'carson'
-__version__ = '0.0.2'
 
-__summary__ = 'An asyncio package to interact the Tesla JSON web service'
+from ._version import get_versions
+__version__ = get_versions()['version']
+del get_versions
+
+__summary__ = 'An asyncio package to interact with the Tesla JSON web service.'
 __uri__ = 'https://github.com/mloyd/carson'
 __author__ = 'Michael Loyd'
 __email__ = 'michael@loyd.org'
