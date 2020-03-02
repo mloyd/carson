@@ -1,8 +1,7 @@
 
 import argparse
 import asyncio
-from datetime import datetime, timedelta
-from . import logging, Session, VehicleStateError, TeslaSessionError
+from . import logging, Session
 
 
 def main():
@@ -49,7 +48,7 @@ async def start(args):
             await car.wake_up()
 
         if args.stream:
-            return await start_streaming(car, args.wake)
+            return await car.stream()
 
         if car.state == 'online':
             await car.data()
@@ -69,95 +68,6 @@ async def start(args):
 
     finally:
         await session.close()
-
-
-async def start_streaming(car, wake):
-    logging.info('Press Ctrl+C to stop')
-    if car.state != 'online' and wake:
-        try:
-            logging.info('Waking up car.')
-            await car.wake_up()
-        except VehicleStateError as err:
-            logging.error('Could not wake up the car! %s', err, exc_info=True)
-            return
-
-    sleep_period = 30.0
-    # The base amount of time to sleep each iteration.
-
-    max_sleep = timedelta(minutes=15).total_seconds()
-
-    iterations = 0
-    waypoints = 0
-    state = car.state
-    user_present = False
-    is_charging = False
-    in_sentry = False
-
-    sleep_multiplier = 1
-    # If the car is online, but there is no user (a.k.a driver) present, this multiplier will slowly
-    # increase so we don't artifically keep the car awake.  I think the period let it sleep is
-    # around ten minutes.
-
-    if state == 'online':
-        logging.debug('Car is online.  Getting initial data...')
-        await car.data()
-        user_present = car.vehicle_state.is_user_present
-        is_charging = car.is_charging
-        in_sentry = car.vehicle_state.sentry_mode
-
-    while True:
-        data_points = None
-        if not user_present:
-            msg = 'No user present.'
-            if in_sentry:
-                msg = 'Car in sentry mode.'
-            elif is_charging:
-                msg = 'Car is charging.'
-            logging.debug('Console stream pass.  %s', msg)
-        else:
-            iterations += 1
-            sleep_multiplier = 1
-            logging.info(f'Console stream loop #{iterations:,}')
-            try:
-                data_points = await car.stream()
-                if data_points:
-                    sleep_multiplier = 1
-                    logging.info(f'Iteration #{iterations:,} complete.  Collected {data_points:,} data points.')
-            except asyncio.exceptions.CancelledError:
-                logging.debug('Console stream loop cancelled.')
-                break
-            except Exception:
-                logging.error('Unhandled error trying to stream.', exc_info=True)
-
-        sleep = min(max_sleep, sleep_period * sleep_multiplier)
-        sdelta = timedelta(seconds=sleep)
-        logging.info('Console stream loop sleeping. car=%r sleep=%s (%s)', state, sdelta, datetime.now() + sdelta)
-        await car.close()
-        await asyncio.sleep(sleep)
-
-        try:
-            await car.refresh()
-            new_state = car.state
-            if new_state != state:
-                logging.info('Car transitioned from %r to %r.', state, new_state)
-            state = new_state
-
-            if state == 'online':
-                # Check to see if the user/driver is present.
-                await car.data()
-                user_present = car.vehicle_state.is_user_present
-                is_charging = car.is_charging
-                in_sentry = car.vehicle_state.sentry_mode
-                if not user_present and not is_charging and not in_sentry:
-                    sleep_multiplier *= 2
-            else:
-                sleep_multiplier = 1
-                user_present = False
-        except TeslaSessionError:
-            logging.error('Error in main stream loop between iterations. Sleeping one minute.', exc_info=True)
-            await asyncio.sleep(60)
-
-    logging.info(f'Console stream loop ended.  Iterations={iterations:,} waypoints={waypoints:,}')
 
 
 if __name__ == '__main__':

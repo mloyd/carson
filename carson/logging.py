@@ -21,7 +21,7 @@ def initLogging(debug=False):
     formatter = logging.Formatter('{asctime} {levelname[0]} {name}  {message}', style='{')
     handlers = [
         logging.StreamHandler(sys.stdout),
-        logging.FileHandler(os.path.join(config.get('log_root'), 'carson.log'))
+        logging.FileHandler(os.path.join(config.get('log_dir'), config.get('log_file')))
     ]
     for handler in handlers:
         logger.addHandler(handler)

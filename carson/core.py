@@ -12,7 +12,7 @@ from pprint import pformat
 
 import aiohttp
 
-from . import config, data, logging, utils, endpoints
+from . import config, logging, utils, endpoints
 
 
 LEGACY_ATTRIBUTES = """
@@ -265,7 +265,6 @@ class Session:
         if not self._vehicles:
             # curl -i -H "Authorization: Bearer d48****281" https://owner-api.teslamotors.com/api/1/vehicles
             jdata = await self.get('/api/1/vehicles')
-            data.record_vehicle_status(jdata)
             vehicles = [Vehicle(self, v) for v in jdata.get('response', None) or []]
             self._vehicles = {v.display_name: v for v in vehicles}
 
@@ -284,7 +283,7 @@ class Session:
     @property
     async def vehicle(self):
         """
-        The equivalent "I'm Feeling Lucky".
+        The equivalent of "I'm Feeling Lucky".
 
         But seriously, my impression is Tesla returns the list of cars in
         chronological order by VIN or purchase/order date?  Returning the 'end'
@@ -461,7 +460,7 @@ class Session:
         return await self.request('POST', path, data=data)
 
 
-class NestedData(object):
+class NestedData:
     """
     Allows for dotted attribute notation on nested levels of JSON data.
     """
@@ -503,7 +502,7 @@ class VehicleStateError(Exception):
         return f'VehicleStateError({self.msg!r} state={self.state!r})'
 
 
-class Vehicle(object):
+class Vehicle:
     """
     Represents an individual Tesla vehicle.
     """
@@ -740,7 +739,6 @@ class Vehicle(object):
         jdata = await self._session.request('GET', f'/api/1/vehicles/{self.id}/vehicle_data', attempts=attempts)
         status = jdata.get('status')
         if status == 200:
-            data.record_vehicle_status(jdata)
             self._init_from(jdata.get('response'))
             return self.dump_dict()
 
@@ -775,7 +773,6 @@ class Vehicle(object):
         self.clear()
 
         jdata = await self._session.get('/api/1/vehicles')
-        data.record_vehicle_status(jdata)
         vehicles = jdata.get('response', None) or []
         for vehicle in vehicles:
             if vehicle.get('vehicle_id') == self.vehicle_id:
@@ -798,12 +795,12 @@ class Vehicle(object):
         """
         return await self._session.post(f'/api/1/vehicles/{self.id}/command/charge_start')
 
-    async def stream(self):
+    async def stream(self, callback=None):
         if self.state != 'online':
             raise VehicleStateError('Car must be online to stream.', state=self.state)
 
         from .stream import stream as _stream
-        return await _stream(self)
+        return await _stream(self, callback)
 
     async def ws_connect(self, *args, **kwargs):
         if not self._session:

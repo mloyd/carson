@@ -6,7 +6,7 @@ from base64 import b64encode
 from datetime import datetime, timedelta
 from aiohttp import WSMsgType
 
-from . import logging, data, utils
+from . import logging, utils
 from .core import VehicleStateError, TeslaSessionError
 
 STREAMING_ENDPOINT = 'wss://streaming.vn.teslamotors.com/streaming/'
@@ -38,11 +38,12 @@ async def stream(car, callback=None):
     vehicle_disconnects = 0
     # Just to keep a count of how many disconnects we get.
 
+    timeouts = 0
+    # Count of how many times we timed out.  Happens normally when car is idle at stoplight.
+
     last_known_shift_state = None
     # Tesla returns an empty string when the car is turned off.  Otherwise it returns:
     #   D=drive R=reverse P=park N=neutral
-
-    last_waypoint_timestamp = datetime.utcnow()
 
     # `cols` will be the payload list/order in which we want the data.  We don't send `timestamp` in
     # the outbound payload.  But we have here because it does come back in each data:update record.
@@ -82,7 +83,8 @@ async def stream(car, callback=None):
 
             while True:
                 msg = await next_message(reader)
-                utcnow = datetime.utcnow()
+                if msg is None:
+                    break
                 _ensure_attrs(msg)
 
                 # We should have a dict parsed from json at this point.  Examples:
@@ -103,20 +105,14 @@ async def stream(car, callback=None):
                     # a red light.
                     if RE_DISCONNECTED.search(etype):
                         vehicle_disconnects += 1
-                        logging.info('Disconnected. disconnects=%d msg_count=%d waypoints=%d msg=%r', vehicle_disconnects, msg_count, waypoints, msg)
+                        logging.info('Disconnected. timeouts=%d disconnects=%d msg_count=%d waypoints=%d msg=%r', timeouts, vehicle_disconnects, msg_count, waypoints, msg)
                         break
 
                     if etype == 'timeout':
-                        logging.debug('Timeout while waiting for next message.')
-                        # Not uncommon.  If time elapsed since our last waypoint recorded is under
-                        # the threshold, just wait for the next message.
-                        if utcnow < last_waypoint_timestamp + TOO_LONG:
-                            continue
-
-                        # Otherwise, We don't want to lose data and should create a manual data
-                        # point from the status endpoint.
-                        logging.debug('Getting manual data point. utcnow=%s last=%s', utcnow, last_waypoint_timestamp)
-                        msg = await _manual_data_point(car, cols)
+                        # Not uncommon.  May just be at a stoplight.
+                        timeouts += 1
+                        logging.info('Timeout. timeouts=%d disconnects=%d msg_count=%d waypoints=%d msg=%r', timeouts, vehicle_disconnects, msg_count, waypoints, msg)
+                        break
 
                     else:
                         logging.warning('msg_count=%d waypoints=%d msg=%r', msg_count, waypoints, msg)
@@ -124,7 +120,6 @@ async def stream(car, callback=None):
                 else:
                     msg_count += 1
 
-                last_waypoint_timestamp = utcnow
                 func = logging.debug if debug or callback else logging.info
                 func('Message %d %r', msg_count, msg)
 
@@ -134,18 +129,19 @@ async def stream(car, callback=None):
                     logging.error(error)
                     raise TeslaSessionError(error)
 
-                record = msg['value']
-                data.record_waypoint(car.vehicle_id, record)
-
-                waypoint = Waypoint(record, cols)
+                waypoint = Waypoint(msg['value'], cols)
                 shift_state = waypoint.shift_state
                 if shift_state != last_known_shift_state:
                     logging.info('New shift state %r.  Last shift state %r', shift_state, last_known_shift_state)
                 last_known_shift_state = shift_state
                 if shift_state:
                     waypoints += 1
+
                 if callback:
-                    callback(waypoint)
+                    if asyncio.iscoroutinefunction(callback):
+                        asyncio.ensure_future(callback(waypoint))
+                    else:
+                        callback(waypoint)
 
         except asyncio.exceptions.CancelledError:
             logging.info('Streaming cancelled.  msg_count=%d waypoints=%d.', msg_count, waypoints)
@@ -181,7 +177,9 @@ async def next_message(reader):
     try:
         msg = await reader.receive()
         if not msg:
-            logging.warning('Receiving no data while waiting for next message.')
+            logging.warning('Received no data while waiting for next message.')
+            return None
+        elif msg.type == WSMsgType.CLOSED:
             return None
         elif msg.type != WSMsgType.BINARY:
             logging.error('Expecting WSMsgType.BINARY but got %r.', msg)
@@ -417,6 +415,9 @@ class Waypoint:
         for col in self._cols:
             buf.append(f'{col}={getattr(self, col)!r}')
         return f'Waypoint({" ".join(buf)})'
+
+    def dump_dict(self):
+        return {col: getattr(self, col) for col in self._cols}
 
 
 STREAM_COLUMNS = {

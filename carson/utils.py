@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timedelta
 
 _ONE_YEAR_MILLIS = timedelta(days=365).total_seconds() * 1000
-_1970 = datetime(1900, 1, 1)
+_1970 = datetime(1970, 1, 1)
 
 
 class JSONEncoderHelper(json.JSONEncoder):

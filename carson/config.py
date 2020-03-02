@@ -29,9 +29,8 @@ _config['DEFAULT'] = {
     'expires_in': '',
     # 3888000
 
-    'data_root': '',
-
-    'log_root': ''
+    'log_dir': '',
+    'log_file': 'carson.log'
 }
 
 
@@ -45,7 +44,7 @@ def get(key, default=None):
         load()
 
     val = _config['carson'].get(key, default)
-    if key in ('log_root', 'data_root'):
+    if key == 'log_dir':
         return _get_abspath(key, val)
 
     return val
