@@ -246,7 +246,55 @@ class Session:
         config.setitems(self.auth)
         self._session = self._create_session(access_token=self.auth.get('access_token'))
 
-    async def vehicles(self, name=None):
+    async def reauthenticate(self):
+        """
+        Essentially the same thing as login with the exception of credentials provided and the URL.
+        Instead of sending email/password, we send our existing access_token.
+
+        If successful, we'll get a new access_token and our previous one will be invalidated.
+        """
+
+        current_token = self.auth.get('access_token')
+        if not current_token:
+            raise TeslaCredentialError('Cannot reauth without an existing access token.')
+
+        self.auth = {'access_token': None, 'created_at': 0, 'expires_in': 0}
+        config.setitems(self.auth)
+
+        # Like `login`, We want to explicitly close the current connection
+        await self.close()
+
+        payload = {
+            'grant_type': 'refresh_token',
+            'client_id': PASTEBIN_ID,
+            'client_secret': PASTEBIN_SECRET,
+            'email': self.email,
+            'refresh_token': current_token
+        }
+        self.logger.debug('Performing OAuth 2.0 Refresh Token.  Existing token=%r', _masked_debug(current_token))
+
+        self._request_count += 1
+        url = f'{BASEURL}/oauth/token?grant_type=refresh_token'
+        rstart = self.timer()
+        rstop = rstart
+        async with self._create_session() as login_session:
+            async with login_session.post(url, data=payload) as req:
+                try:
+                    status, jdata = req.status, await req.json()
+                    rstop = self.timer()
+                except json.decoder.JSONDecodeError:
+                    raise TeslaCredentialError('json.decoder.JSONDecodeError')
+        self.logger.debug('Req# %d:  Method=POST url=%r status=%s duration=%s', self._request_count, url, status, timedelta(seconds=rstop - rstart))
+
+        if status != 200:
+            raise TeslaCredentialError(response=jdata)
+
+        newdata = {k: jdata.get(k) for k in self.auth if k in jdata}
+        self.auth.update(newdata)
+        config.setitems(self.auth)
+        self._session = self._create_session(access_token=self.auth.get('access_token'))
+
+    async def vehicles(self, *, name=None, cache=True):
         """
         Returns a car matched by name or a list of vehicles owned by the Tesla
         account.
@@ -257,7 +305,14 @@ class Session:
           If not None, an exact match is attempted first.  If no match is found,
           an attempt to make a case-insensitive match based on the display name
           either 'starting with' or 'ending with' is made.
+
+        cache:
+          If True (default) then return what is cached, if anything.
+          If False, disregard memory and make another request to Tesla.
         """
+
+        if not cache:
+            self._vehicles.clear()
 
         if not name and self._vehicles:
             return self._vehicles
@@ -715,7 +770,7 @@ class Vehicle:
             try:
                 jdata = await self._session.request('GET', f'/api/1/vehicles/{self.id}/vehicle_data')
                 self._init_from(jdata.get('response'))
-                return self.dump_dict()
+                return self.dump()
             except TeslaSessionError as err:
                 if err.status != 408 or attempt == attempts:
                     self.state = previous_state
@@ -740,7 +795,7 @@ class Vehicle:
         status = jdata.get('status')
         if status == 200:
             self._init_from(jdata.get('response'))
-            return self.dump_dict()
+            return self.dump()
 
         if status == 408:
             msg = 'Car is no longer online.'
@@ -780,13 +835,13 @@ class Vehicle:
                 return
         raise TeslaSessionError('Could not refresh self!  Car not found!', response=jdata)
 
-    def dump_dict(self):
+    def dump(self):
         dumpable = {attr: val for attr, val in self.__dict__.items() if not attr.startswith('_')}
         dumpable.update({key: val for key, val in self._override.items()})
         return dumpable
 
-    def dump(self):
-        return pformat(self.dump_dict(), width=100)
+    def pformat(self):
+        return pformat(self.dump(), width=100)
 
     async def start_charge(self):
         """
@@ -795,12 +850,12 @@ class Vehicle:
         """
         return await self._session.post(f'/api/1/vehicles/{self.id}/command/charge_start')
 
-    async def stream(self, callback=None):
+    async def stream(self, *, callback=None):
         if self.state != 'online':
             raise VehicleStateError('Car must be online to stream.', state=self.state)
 
         from .stream import stream as _stream
-        return await _stream(self, callback)
+        return await _stream(self, callback=callback)
 
     async def ws_connect(self, *args, **kwargs):
         if not self._session:
@@ -812,13 +867,18 @@ def _masked_debug(d):
     if d is None:
         return None
 
-    buf = '{'
+    assert isinstance(d, str) or isinstance(d, dict), type(d)
+
+    if isinstance(d, str):
+        if len(d) < 5:
+            return '***'
+        return f'{d[:3]}***{d[-3:]}'
+
+    buf = []
     for key in sorted(d):
         assert isinstance(key, str)
-        val = d.get(key)
-        if str(key).lower() in ('authorization', 'password', 'access_token'):
-            val = '***'
-        if buf != '{':
-            buf += ', '
-        buf += f'{key!r}: {val!r}'
-    return f'{buf}}}'
+        val = '***' if key.lower() == 'password' else d.get(key)
+        if val and key.lower() in ('authorization', 'access_token'):
+            val = '***' if len(val) < 5 else f'{val[:3]}***{val[-3:]}'
+        buf.append(f'{key!r}: {val!r}')
+    return f'{{{", ".join(buf)}}}'

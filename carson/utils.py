@@ -1,17 +1,18 @@
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 _ONE_YEAR_MILLIS = timedelta(days=365).total_seconds() * 1000
-_1970 = datetime(1970, 1, 1)
 
 
 class JSONEncoderHelper(json.JSONEncoder):
     def default(self, obj):
         if isinstance(obj, datetime):
-            if obj < _1970:
-                return 0
-            return int((obj - _1970).total_seconds() * 1000)
+            if not obj.tzinfo:
+                obj = datetime.fromtimestamp(obj.timestamp(), tz=timezone.utc)
+            return obj.isoformat(timespec='microseconds')
+        if hasattr(obj, 'dump') and callable(obj.dump):
+            return obj.dump()
         return super().default(obj)
 
 
@@ -22,8 +23,8 @@ def _json_timestamp_decoder(obj):
             if (not isinstance(val, int) and not isinstance(val, float)) or val <= 0:
                 val = None
             else:
-                delta = timedelta(seconds=val) if val < _ONE_YEAR_MILLIS else timedelta(milliseconds=val)
-                val = datetime(1970, 1, 1) + delta
+                val = val / 1000 if val > _ONE_YEAR_MILLIS else val
+                val = datetime.fromtimestamp(val, tz=timezone.utc)
             obj[attr] = val
     return obj
 

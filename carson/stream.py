@@ -1,7 +1,5 @@
-#!venv/bin/python
 
 import asyncio, re
-from collections.abc import Iterable
 from base64 import b64encode
 from datetime import datetime, timedelta
 from aiohttp import WSMsgType
@@ -16,9 +14,12 @@ RE_CLIENT_ERROR = re.compile(r'client[ _]*error')
 RE_DISCONNECTED = re.compile(r'vehicle[ _]*disconnected')
 
 
-async def stream(car, callback=None):
+async def stream(car, *, callback=None):
     """
     The main entry point to streaming telemetry from the vehicle.
+
+    callback:
+      The function (awaitable or not) to call on message receive.
     """
 
     state = car.state
@@ -28,6 +29,7 @@ async def stream(car, callback=None):
     if not hasattr(car, 'vehicle_state') or not car.vehicle_state.is_user_present:
         await car.data()
 
+    iscoro = asyncio.iscoroutinefunction(callback)
     user_present = car.vehicle_state.is_user_present
 
     iteration = 0
@@ -89,9 +91,9 @@ async def stream(car, callback=None):
 
                 # We should have a dict parsed from json at this point.  Examples:
                 #   {"msg_type":"control:hello","connection_timeout":0}
-                #   {"msg_type":"data:update","tag":"1724695783","value":"1573135344345,,14932.8,54,236,185,33.206897,-96.739708,0,,163,136,185"}
-                #   {"msg_type":"data:error","tag":"1724695783","value":"disconnected","error_type":"vehicle_disconnected"}
-                #   {"msg_type":"data:error","tag":"1724695783","value":"Can't validate password. ","error_type":"client_error"}
+                #   {"msg_type":"data:update","tag":"1234567890","value":"1573135344345,,14932.8,54,236,185,32.747871,-97.092712,0,,163,136,185"}
+                #   {"msg_type":"data:error","tag":"1234567890","value":"disconnected","error_type":"vehicle_disconnected"}
+                #   {"msg_type":"data:error","tag":"1234567890","value":"Can't validate password. ","error_type":"client_error"}
                 #
                 # Or we have one represented by a timeout
                 #   {"msg_type":"data:error","error_type":"timeout"}
@@ -129,7 +131,7 @@ async def stream(car, callback=None):
                     logging.error(error)
                     raise TeslaSessionError(error)
 
-                waypoint = Waypoint(msg['value'], cols)
+                waypoint = Waypoint(msg['value'], cols, tag)
                 shift_state = waypoint.shift_state
                 if shift_state != last_known_shift_state:
                     logging.info('New shift state %r.  Last shift state %r', shift_state, last_known_shift_state)
@@ -138,8 +140,8 @@ async def stream(car, callback=None):
                     waypoints += 1
 
                 if callback:
-                    if asyncio.iscoroutinefunction(callback):
-                        asyncio.ensure_future(callback(waypoint))
+                    if iscoro:
+                        asyncio.create_task(callback(waypoint))
                     else:
                         callback(waypoint)
 
@@ -284,41 +286,40 @@ class Waypoint:
     data it accepts.
     """
 
-    def __init__(self, record, cols):
+    def __init__(self, record, cols, tag):
         """
-        record: A csv string of data or an iterable of values
-        cols: A csv string of column names to which the records fields map.
+        record: A CSV string of data representing the record.
+        cols: A list of column names to which the record fields map.
+        tag: Since tag is not a part of the CSV record, it is supplied separately.
         """
 
-        if not cols or not isinstance(cols, Iterable) or not all(cols):
-            raise ValueError(f'Value for `cols` must be "str" or "Iterable".')
+        if not isinstance(cols, list) or not all(cols):
+            raise ValueError(f'Value for `cols` must be list of strings.')
 
-        if not record or not isinstance(record, Iterable):
-            raise ValueError(f'Value for `record` must be "str" or "Iterable".')
+        if not isinstance(record, str) or not record:
+            raise ValueError(f'Value for `record` must be csv string.')
 
-        self._cols = []
-        self._record = []
-
-        if isinstance(cols, str):
-            self._cols = cols.lower().split(',')
-        else:
-            for col in cols:
-                col = str(col).lower()
-                if not col:
-                    raise ValueError('Every element in cols must evaluate to a non-empty string.')
-                if col in self._cols:
-                    raise ValueError(f'Duplicate column name {col!r}')
-                self._cols.append(col)
-
-        if isinstance(record, str):
-            self._record = record.split(',')
-        else:
-            self._record = [str(part) for part in record]
+        self._cols = cols
+        self._record = record.split(',')
+        self.tag = tag
 
         if len(self._cols) > len(self._record):
             raise ValueError(f'Not enough values in record ({len(self._record)}) to match all {len(self._cols)} columns.')
         elif len(self._cols) < len(self._record):
             raise ValueError(f'Too many values in record ({len(self._record)}) for {len(self._cols)} column(s).')
+
+        if __debug__:
+            self._cols = []
+            for col in cols:
+                if not isinstance(col, str):
+                    raise ValueError(f'Each element in `cols` should be a `str`. Not {type(col)!r}.')
+                if col != col.lower():
+                    raise ValueError('Column names should be passed in as all lowercase.')
+                if not col:
+                    raise ValueError('Every element in cols must evaluate to a non-empty string.')
+                if col in self._cols:
+                    raise ValueError(f'Duplicate column name {col!r}')
+                self._cols.append(col)
 
         self._map_col_to_parser = {
             'timestamp':   (Waypoint._parse_timestamp,             ),  # noqa
@@ -385,7 +386,6 @@ class Waypoint:
         return default
 
     def __getattribute__(self, attr):
-        # print(f'__getattribute__(self, attr={attr!r})')
         try:
             return object.__getattribute__(self, attr)
         except AttributeError:
@@ -416,8 +416,14 @@ class Waypoint:
             buf.append(f'{col}={getattr(self, col)!r}')
         return f'Waypoint({" ".join(buf)})'
 
-    def dump_dict(self):
-        return {col: getattr(self, col) for col in self._cols}
+    def dump(self):
+        """
+        Returns a dict of itself that can be used by `utils.json_dumps`.   It cannot be used
+        directly by Python's `json.dumps` because timestamp will be an instance of `datetime`.
+        """
+        result = {'tag': self.tag}
+        result.update({col: getattr(self, col) for col in self._cols})
+        return result
 
 
 STREAM_COLUMNS = {
