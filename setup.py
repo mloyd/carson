@@ -1,3 +1,5 @@
+#!venv/bin/python
+
 import os
 import shutil
 from setuptools import setup, Command
@@ -34,7 +36,8 @@ class FlitBuildCommand(FlitCommand):
         cmd = f'flit build --format {self.format}'
         if self.verbose:
             print(cmd)
-        os.system(cmd)
+        if os.system(cmd):
+            raise SystemExit(1)
 
 
 class FlitPublishCommand(FlitCommand):
@@ -47,7 +50,8 @@ class FlitPublishCommand(FlitCommand):
         cmd = f'flit publish --format {self.format}'
         if self.verbose:
             print(cmd)
-        os.system(cmd)
+        if os.system(cmd):
+            raise SystemExit(1)
 
 
 class CleanCommand(Command):
