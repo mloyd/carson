@@ -1,6 +1,8 @@
 
 # carson
 
+[![Latest Version][pypi-image]][pypi-url]
+
 * [Overview](#overview)
 * [States And Commands](#states-and-commands)
 * [Configuration](#configuration)
@@ -219,72 +221,5 @@ or this command
  'status': 200}
 ```
 
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/firacode@2.0.0/distr/fira_code.min.css">
-<!--
-To Build this with pandoc
-> echo "\
-<style>
-@import url(https://cdn.jsdelivr.net/npm/firacode@2.0.0/distr/fira_code.min.css);
-:root {
-  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','Roboto','Helvetica Neue', Arial, sans-serif,'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
-}
-
-body {
-  margin: 0;
-  padding: 2rem;
-  box-sizing: border-box;
-}
-*::before,
-*::after {
-  box-sizing: border-box;
-}
-body header:first-child {
-  display: none;
-}
-blockquote {
-  margin: 0;
-  padding: 0 1em;
-  color: rgba(92, 94, 98, 0.7);
-  border-left: .25em solid #dfe2e5;
-  font-size: 0.85rem;
-}
-blockquote strong {
-  font-style: italic;
-}
-a:not(.sourceLine) {
-  color: rgb(92, 94, 98);
-  text-decoration: none;
-  box-shadow: 0 1px 0 0 rgba(92, 94, 98, 0.5);
-}
-a:not(.sourceLine):hover {
-  transition: box-shadow 100ms cubic-bezier(.5,.25,.25,.75),color 100ms cubic-bezier(.5,.25,.25,.75);
-  box-shadow: 0 2px 0 0 rgba(92, 94, 98, 0.3);
-  /* offset-x | offset-y | blur-radius | spread-radius | color */
-}
-a code {
-  font-size: 0.9rem;
-}
-pre,
-code,
-.text-mono {
-  font-family: 'Fira Code';
-  font-feature-settings: 'calt'1, 'ss20'1;
-  text-rendering: optimizeLegibility;
-}
-pre {
-  background-color: #f8f9fa;
-  font-size: 0.8rem;
-}
-pre {
-  padding: 1rem;
-  overflow: auto;
-  font-size: 0.75rem;
-}
-pre > code {
-  white-space: pre;
-}
-</style>
-" > tmp/readme.css
-> pandoc --standalone --include-in-header tmp/readme.css --metadata=title:carson README.md --output tmp/readme.html
-
--->
+[pypi-image]: https://img.shields.io/pypi/v/carson.svg
+[pypi-url]: https://pypi.org/project/carson/
