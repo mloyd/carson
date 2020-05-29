@@ -38,7 +38,7 @@ async def start(args):
                 logging.error('No cars associated with this account!')
             return
 
-        car = await session.vehicles(args.name) if args.name else await session.car
+        car = await session.vehicles(name=args.name) if args.name else await session.car
         if not car:
             logging.error('No cars associated with this account!')
             return
