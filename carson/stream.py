@@ -294,19 +294,20 @@ class Waypoint:
         """
 
         if not isinstance(cols, list) or not all(cols):
-            raise ValueError(f'Value for `cols` must be list of strings.')
+            raise ValueError('Value for `cols` must be list of strings.')
 
         if not isinstance(record, str) or not record:
-            raise ValueError(f'Value for `record` must be csv string.')
+            raise ValueError('Value for `record` must be csv string.')
 
         self._cols = cols
-        self._record = record.split(',')
+        self._record = record
+        self._fields = record.split(',')
         self.tag = tag
 
-        if len(self._cols) > len(self._record):
-            raise ValueError(f'Not enough values in record ({len(self._record)}) to match all {len(self._cols)} columns.')
-        elif len(self._cols) < len(self._record):
-            raise ValueError(f'Too many values in record ({len(self._record)}) for {len(self._cols)} column(s).')
+        if len(self._cols) > len(self._fields):
+            raise ValueError(f'Not enough values in record ({len(self._fields)}) to match all {len(self._cols)} columns.')
+        elif len(self._cols) < len(self._fields):
+            raise ValueError(f'Too many values in record ({len(self._fields)}) for {len(self._cols)} column(s).')
 
         if __debug__:
             self._cols = []
@@ -339,6 +340,10 @@ class Waypoint:
         # By simply call getattributes we essentially are validating initial values.
         [getattr(self, attr) for attr in self._cols]
 
+    @property
+    def record(self):
+        return self._record
+
     @staticmethod
     def _parse_numeric(func, val, minimum=None, maximum=None):
         if not val:
@@ -370,7 +375,6 @@ class Waypoint:
     @staticmethod
     def _parse_timestamp(val, minimum=None, maximum=None):
         val = Waypoint._parse_int(val)
-        1_579_516_745_939
         if val > 9_999_999_999:
             val *= .001
         ts = datetime.fromtimestamp(val)
@@ -398,7 +402,7 @@ class Waypoint:
             return 'I don\'t have that.'
 
         parser, *args = self._map_col_to_parser.get(attr, (self._parse_str,))
-        val = self._record[idx]
+        val = self._fields[idx]
         try:
             return parser(val, *args)
         except ValueError as err:
@@ -407,7 +411,7 @@ class Waypoint:
     def __repr__(self):
         buf = []
         for i, col in enumerate(self._cols):
-            buf.append(f'{col}={self._record[i]!r}')
+            buf.append(f'{col}={self._fields[i]!r}')
         return f'Waypoint({" ".join(buf)})'
 
     def __str__(self):
@@ -424,6 +428,12 @@ class Waypoint:
         result = {'tag': self.tag}
         result.update({col: getattr(self, col) for col in self._cols})
         return result
+
+    def encode(self, encoding='utf-8', errors='strict'):
+        """
+        Returns original record encoded as bytes.  Useful for stream processing (e.g. Kafka).
+        """
+        return self.record.encode(encoding=encoding, errors=errors)
 
 
 STREAM_COLUMNS = {
