@@ -13,7 +13,8 @@
 
 `carson` is a simple Python interface for Tesla's unofficial JSON API and includes some utilities to work with data it
 generates.  Lots of work to discover and document the API was done by Tim Dorr and dozens of contributors to his
-[tesla-api](https://github.com/timdorr/tesla-api) project.  So, thanks to them for the head start.
+[tesla-api](https://github.com/timdorr/tesla-api) project as well as Mark Seminatore and
+[TeslaJS](https://github.com/mseminatore/TeslaJS).  So, thanks to them for the head start.
 
 Among the goals for this project is to have an [`asyncio`](https://docs.python.org/3/library/asyncio.html) based
 library.  As a result, Python 2 is not supported.  In fact, it seems like it has been a decade since the *provisional*

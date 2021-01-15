@@ -148,6 +148,10 @@ class Session:
             return None
         return self.expires < datetime.utcnow()
 
+    @property
+    def access_token(self):
+        return self.auth.get('access_token', None)
+
     def __str__(self):
         buf = f'<Session email={self.email!r}'
 
@@ -734,8 +738,15 @@ class Vehicle:
         return self.tokens[0] if self.tokens else 'none'
 
     @property
+    def access_token(self):
+        """
+        Not to be confused with self.token
+        """
+        return self._session.auth.get('access_token') if self._session else None
+
+    @property
     def email(self):
-        return self._session and self._session.email
+        return self._session.email if self._session else None
 
     @property
     def is_charging(self):

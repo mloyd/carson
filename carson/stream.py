@@ -61,8 +61,7 @@ async def stream(car, *, callback=None):
         logging.info('Starting stream loop #%d. %s', iteration, car)
 
         reader = None
-        auth = b64encode(f'{car.email}:{car.token}'.encode()).decode()
-        subscribe = f'{{"msg_type":"data:subscribe","token":"{auth}","value":"{",".join(cols[1:])}","tag":"{car.vehicle_id}"}}'
+        subscribe = f'{{"msg_type":"data:subscribe_oauth","token":"{car.access_token}","value":"{",".join(cols[1:])}","tag":"{car.vehicle_id}"}}'
         logging.debug('subscribe=%r', subscribe)
 
         try:
