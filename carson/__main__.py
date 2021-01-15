@@ -1,7 +1,9 @@
 
 import argparse
 import asyncio
-from . import logging, Session
+from getpass import getpass
+
+from . import logging, Session, TeslaCredentialError
 
 
 def main():
@@ -20,6 +22,9 @@ def main():
     logging.initLogging(debug=args.verbose)
     try:
         asyncio.run(start(args), debug=args.verbose)
+    except TeslaCredentialError as err:
+        print(err, '\n')
+        parser.print_help()
     except KeyboardInterrupt:
         pass
 
@@ -27,7 +32,8 @@ def main():
 async def start(args):
 
     session = Session(email=args.email, password=args.password, access_token=args.access_token, verbose=args.verbose)
-
+    if session.email and not session.password and not session.access_token:
+        session.password = getpass(f'Password for {session.email}: ')
     try:
         if args.list:
             carnbr = 0
