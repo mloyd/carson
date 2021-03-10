@@ -21,14 +21,15 @@ from .core import Session
 from .core import TeslaCredentialError
 from .core import VehicleStateError
 from .core import TeslaSessionError
-from . import stream
+from . import auth
 from . import logging
+from . import stream
 
 
 __ALL__ = [
     '__title__', '__version__', '__summary__', '__uri__', '__author__',
     '__email__', '__license__', '__copyright__',
-    'Session', 'TeslaCredentialError', 'VehicleStateError', 'TeslaSessionError', 'stream', 'logging'
+    'Session', 'TeslaCredentialError', 'VehicleStateError', 'TeslaSessionError', 'auth', 'logging', 'stream'
 ]
 
 

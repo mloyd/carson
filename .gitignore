@@ -12,6 +12,5 @@ venv*
 
 # Misc
 .DS_Store
-
-# Editors
 .vscode
+.icloud

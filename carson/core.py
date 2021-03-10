@@ -12,7 +12,7 @@ from pprint import pformat
 
 import aiohttp
 
-from . import config, logging, utils, endpoints
+from . import config, logging, auth, utils, endpoints, __version__ as _version
 
 
 LEGACY_ATTRIBUTES = """
@@ -43,10 +43,7 @@ _legacy_parser = configparser.ConfigParser(allow_no_value=True)
 _legacy_parser.read_string(LEGACY_ATTRIBUTES)
 LEGACY_ATTRIBUTES = tuple(_legacy_parser.options('legacy'))
 
-
 BASEURL = 'https://owner-api.teslamotors.com'
-PASTEBIN_ID = 'e4a9949fcfa04068f59abb5a658f2bac0a3428e4652315490b659d5ab3f35a9e'
-PASTEBIN_SECRET = 'c75f14bbadc8bee3a7594412c31416f8300256d7668ea7e6e7f06727bfb9d220'
 
 
 class TeslaSessionError(Exception):
@@ -108,9 +105,11 @@ class Session:
             # The Unix timestamp value (UTC) returned when generating an auth
             # token.  Number of seconds since 1970.
 
-            'expires_in': config.getint('expires_in', 0)
+            'expires_in': config.getint('expires_in', 0),
             # The number of seconds returned from auth_timestamp the token will
             # expire.  Sometimes it's big like 45 days.
+
+            'refresh_token': config.get('refresh_token'),
         }
 
         if password:
@@ -175,7 +174,7 @@ class Session:
         return buf + '>'
 
     def _create_session(self, access_token=None):
-        default_headers = {'User-Agent': 'carson'}
+        default_headers = {'User-Agent': f'carson/{_version}'}
         if access_token:
             default_headers['Authorization'] = f'Bearer {access_token}'
             if self.verbose > 2:
@@ -207,7 +206,7 @@ class Session:
 
     async def login(self):
 
-        self.auth = {'access_token': None, 'created_at': 0, 'expires_in': 0}
+        self.auth = {'access_token': None, 'refresh_token': None, 'created_at': 0, 'expires_in': 0}
         config.setitems(self.auth)
 
         # We want to explicitly close any current session to make sure we
@@ -220,80 +219,13 @@ class Session:
             missing = ', '.join(missing)
             raise TeslaCredentialError(f'Cannot login.  Missing attributes: {missing}.')
 
-        payload = {
-            'grant_type': 'password',
-            'client_id': PASTEBIN_ID,
-            'client_secret': PASTEBIN_SECRET,
-            'email': self.email,
-            'password': self.password
-        }
-        self.logger.debug('Performing OAuth password grant for email=%r', self.email)
+        try:
+            new_auth = await auth.get_auth_data(self.email, self.password, logger=self.logger)
+        except Exception:
+            self.logger.error('Could not authenticate.', exc_info=True)
+            raise TeslaCredentialError()
 
-        self._request_count += 1
-        url = f'{BASEURL}/oauth/token?grant_type=password'
-        rstart = self.timer()
-        rstop = rstart
-        async with self._create_session() as login_session:
-            async with login_session.post(url, data=payload) as req:
-                try:
-                    status, jdata = req.status, await req.json()
-                    rstop = self.timer()
-                except json.decoder.JSONDecodeError:
-                    raise TeslaCredentialError('json.decoder.JSONDecodeError')
-        self.logger.debug('Req# %d:  Method=POST url=%r status=%s duration=%s', self._request_count, url, status, timedelta(seconds=rstop - rstart))
-
-        if status != 200:
-            raise TeslaCredentialError(response=jdata)
-
-        newdata = {k: jdata.get(k) for k in self.auth if k in jdata}
-        self.auth.update(newdata)
-        config.setitems(self.auth)
-        self._session = self._create_session(access_token=self.auth.get('access_token'))
-
-    async def reauthenticate(self):
-        """
-        Essentially the same thing as login with the exception of credentials provided and the URL.
-        Instead of sending email/password, we send our existing access_token.
-
-        If successful, we'll get a new access_token and our previous one will be invalidated.
-        """
-
-        current_token = self.auth.get('access_token')
-        if not current_token:
-            raise TeslaCredentialError('Cannot reauth without an existing access token.')
-
-        self.auth = {'access_token': None, 'created_at': 0, 'expires_in': 0}
-        config.setitems(self.auth)
-
-        # Like `login`, We want to explicitly close the current connection
-        await self.close()
-
-        payload = {
-            'grant_type': 'refresh_token',
-            'client_id': PASTEBIN_ID,
-            'client_secret': PASTEBIN_SECRET,
-            'email': self.email,
-            'refresh_token': current_token
-        }
-        self.logger.debug('Performing OAuth 2.0 Refresh Token.  Existing token=%r', _masked_debug(current_token))
-
-        self._request_count += 1
-        url = f'{BASEURL}/oauth/token?grant_type=refresh_token'
-        rstart = self.timer()
-        rstop = rstart
-        async with self._create_session() as login_session:
-            async with login_session.post(url, data=payload) as req:
-                try:
-                    status, jdata = req.status, await req.json()
-                    rstop = self.timer()
-                except json.decoder.JSONDecodeError:
-                    raise TeslaCredentialError('json.decoder.JSONDecodeError')
-        self.logger.debug('Req# %d:  Method=POST url=%r status=%s duration=%s', self._request_count, url, status, timedelta(seconds=rstop - rstart))
-
-        if status != 200:
-            raise TeslaCredentialError(response=jdata)
-
-        newdata = {k: jdata.get(k) for k in self.auth if k in jdata}
+        newdata = {k: new_auth.get(k) for k in self.auth if k in new_auth}
         self.auth.update(newdata)
         config.setitems(self.auth)
         self._session = self._create_session(access_token=self.auth.get('access_token'))

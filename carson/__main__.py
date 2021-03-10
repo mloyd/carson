@@ -1,23 +1,34 @@
 
 import argparse
 import asyncio
+import warnings
+
 from getpass import getpass
 
-from . import logging, Session, TeslaCredentialError
+from . import auth, logging, Session, TeslaCredentialError, __version__ as _version
 
 
 def main():
-    parser = argparse.ArgumentParser('carson', description='Command line utilility for carson.')
-    parser.add_argument('--email', '-e', help='The email address associated with your Tesla account.')
-    parser.add_argument('--password', '-p', help='The password associated with your Tesla account.')
+    parser = argparse.ArgumentParser('carson', description=f'Command line utility for carson/{_version}.')
+    parser.add_argument('--email', '-e', help='The email associated with your Tesla account.')
+    parser.add_argument('--password', '-p', metavar='P', help=argparse.SUPPRESS)
     parser.add_argument('--access-token', '-t', '--token', help='An access token that can be used in lieue of email/password.')
     parser.add_argument('--list', '-l', default=False, action='store_true', help='List vehicles associated with the account and exit.')
-    parser.add_argument('--name', '-n', '--car-name', '--display-name', help='The vehicle display name')
+    parser.add_argument('--name', '-n', '--car-name', '--car', '--display-name', help='The vehicle display name')
     parser.add_argument('--stream', '-s', default=False, action='store_true', help='Start streaming telemetry.')
     parser.add_argument('--command', '-c', default=[], action='append', help='Perform the data request or command specified.')
-    parser.add_argument('--no-wake', dest='wake', default=True, action='store_false', help='If the car is not awake, don\'t try.')
+    parser.add_argument('--wake', dest='wake', default=False, action='store_true', help='Wake the car if necessary.')
+    parser.add_argument('--no-wake', default=None, action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--verbose', '-v', default=0, action='count')
     args = parser.parse_args()
+
+    if args.no_wake:
+        warnings.warn('The --no-wake argument is deprecated.  You can explicitly wake using the --wake argument.')
+        if args.wake:
+            raise SystemExit('Cannot specify both --wake and --no-wake')
+
+    if not any([args.list, args.command, args.stream, args.name]):
+        return parser.print_help()
 
     logging.initLogging(debug=args.verbose)
     try:
