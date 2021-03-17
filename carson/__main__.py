@@ -47,7 +47,7 @@ async def start(args):
         session.password = getpass(f'Password for {session.email}: ')
     try:
 
-        result = await session.vehicles(name=args.name) if args.name else await session.car
+        result = await session.vehicles(name=args.name) if args.name or args.list else await session.car
         if not result:
             logging.error('Nothing associated with this account!')
             return
