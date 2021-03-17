@@ -46,18 +46,23 @@ async def start(args):
     if session.email and not session.password and not session.access_token:
         session.password = getpass(f'Password for {session.email}: ')
     try:
-        if args.list:
-            carnbr = 0
-            for carnbr, car in enumerate(await session.vehicles()):
-                carnbr += 1
-                logging.info('Car #%d %r', carnbr, car)
-            if not carnbr:
-                logging.error('No cars associated with this account!')
+
+        result = await session.vehicles(name=args.name) if args.name else await session.car
+        if not result:
+            logging.error('Nothing associated with this account!')
             return
 
-        car = await session.vehicles(name=args.name) if args.name else await session.car
-        if not car:
-            logging.error('No cars associated with this account!')
+        if args.list or isinstance(result, list):
+            result = result if isinstance(result, list) else [result,]
+            for carnbr, car in enumerate(result, start=1):
+                logging.info('Car #%d %r', carnbr, car)
+            return
+
+        car = result[0] if isinstance(result, list) else result
+        if car.in_service:
+            logging.info('%r', car)
+            if args.wake or args.stream or args.command:
+                logging.error('Cannot perform any more commands while car is in Tesla Service.')
             return
 
         if car.state != 'online' and args.wake:

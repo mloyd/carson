@@ -34,10 +34,6 @@ LEGACY_ATTRIBUTES = """
     # These two, like color, have always been null for me.  I'm guessing this
     # could be wrong since I have never seen this data for anything other than
     # a Model 3.
-
-    in_service
-    # Ditto.  Although, this could be a semantic?  Depends on your definition
-    # of the word 'service'.  Perhaps 'in for service'?
 """
 _legacy_parser = configparser.ConfigParser(allow_no_value=True)
 _legacy_parser.read_string(LEGACY_ATTRIBUTES)
@@ -388,17 +384,6 @@ class Session:
                 if self.verbose > 2:
                     for i, (key, val) in enumerate(resp.headers.items()):
                         self.logger.debug(f'Header {i:,}: {key: <30}  {val}')
-                    for k in dir(resp):
-                        if k.startswith('_'):
-                            continue
-                        buf = k.ljust(30)
-                        val = getattr(resp, k) if hasattr(resp, k) else None
-                        val = repr(val)[:100]
-                        if 'access_token' in val:
-                            val = '***masked***'
-                        buf += val
-                        self.logger.debug(buf)
-                if self.verbose > 2:
                     self.logger.debug('=' * 110)
 
             txt = await resp.text()
@@ -586,6 +571,7 @@ class Vehicle:
         attrs = tuple("""
             display_name
             state
+            in_service
             id
             vehicle_state.is_user_present
             vehicle_state.sentry_mode
@@ -599,6 +585,7 @@ class Vehicle:
         """.split())
 
         unless_eqs = {
+            'in_service': False,
             'vehicle_state.is_user_present': False,
             'vehicle_state.sentry_mode': False,
             'charge_state.charging_state': 'Stopped',
@@ -607,6 +594,7 @@ class Vehicle:
 
         formatters = {
             'display_name': lambda val: repr(val),
+            'in_service': lambda val: '(In Service)',
             'vehicle_state.odometer': lambda val: f'miles={int(val):,}',
             'vehicle_state.car_version': lambda val: 'software={}'.format(repr(val.split(' ')[0])),
             'charge_state.time_to_full_charge': lambda val: str(timedelta(seconds=float(val) * 60 * 60)) + ' remaining'
@@ -701,6 +689,9 @@ class Vehicle:
         return await self.actuate_trunk('front')
 
     async def wake_up(self):
+        if self.in_service:
+            raise VehicleStateError('Vehicle is in service.', state=self.state)
+
         # curl -i --oauth2-bearer 99***7c --data "" https://owner-api.teslamotors.com/api/1/vehicles/12345678901234567/wake_up
         previous_state = self.state
         await self._session.request('POST', f'/api/1/vehicles/{self.id}/wake_up')
