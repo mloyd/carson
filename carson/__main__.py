@@ -5,11 +5,11 @@ import warnings
 
 from getpass import getpass
 
-from . import auth, logging, Session, TeslaCredentialError, __version__ as _version
+from . import auth, logging, Session, TeslaCredentialError, get_version
 
 
 def main():
-    parser = argparse.ArgumentParser('carson', description=f'Command line utility for carson/{_version}.')
+    parser = argparse.ArgumentParser('carson', description=f'Command line utility for carson/{get_version()}.')
     parser.add_argument('--email', '-e', help='The email associated with your Tesla account.')
     parser.add_argument('--password', '-p', metavar='P', help=argparse.SUPPRESS)
     parser.add_argument('--access-token', '-t', '--token', help='An access token that can be used in lieue of email/password.')
@@ -19,8 +19,13 @@ def main():
     parser.add_argument('--command', '-c', default=[], action='append', help='Perform the data request or command specified.')
     parser.add_argument('--wake', dest='wake', default=False, action='store_true', help='Wake the car if necessary.')
     parser.add_argument('--no-wake', default=None, action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument('--version', default=False, action='store_true', help='Prints version and exits')
     parser.add_argument('--verbose', '-v', default=0, action='count')
     args = parser.parse_args()
+
+    if args.version:
+        print(f'carson-{get_version()}')
+        return
 
     if args.no_wake:
         warnings.warn('The --no-wake argument is deprecated.  You can explicitly wake using the --wake argument.')

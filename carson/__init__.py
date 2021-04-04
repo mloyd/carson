@@ -5,17 +5,15 @@
 
 __title__ = 'carson'
 
-from ._version import get_versions
-__version__ = get_versions()['version']
-del get_versions
-
+from ._version import get_version
+__version__ = get_version().pipversion
 __summary__ = 'An asyncio package to interact with the Tesla JSON web service.'
 __uri__ = 'https://github.com/mloyd/carson'
 __author__ = 'Michael Loyd'
 __email__ = 'michael@loyd.org'
 
 __license__ = 'MIT'
-__copyright__ = "Copyright 2020 %s" % __author__
+__copyright__ = "Copyright 2021 %s" % __author__
 
 from .core import Session
 from .core import TeslaCredentialError

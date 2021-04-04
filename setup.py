@@ -1,11 +1,9 @@
-#!venv/bin/python
 
 import os
 import shutil
 from setuptools import setup, Command
 from distutils.errors import DistutilsSetupError
 import carson
-import versioneer
 
 
 class FlitCommand(Command):
@@ -18,9 +16,10 @@ class FlitCommand(Command):
     def initialize_options(self):
         self.format = 'wheel'
         self.force = False
+        self.dirty = carson.get_version().dirty
 
     def finalize_options(self):
-        if dirty and not self.force:
+        if self.dirty and not self.force:
             raise DistutilsSetupError(f'Dirty repository!  Use --force to override.')
         if self.format not in ('wheel', 'sdist'):
             raise DistutilsSetupError(f'--format must be either "wheel" or "dist".')
@@ -33,11 +32,19 @@ class FlitBuildCommand(FlitCommand):
     description = 'Build everything needed to install using `flit`'
 
     def run(self):
+        root = os.path.dirname(os.path.abspath(__file__))
+        __v = os.path.join(root, 'carson', '__v')
+        with open(__v, 'w') as writer:
+            writer.write(carson.get_version().described)
         cmd = f'flit build --format {self.format}'
         if self.verbose:
             print(cmd)
-        if os.system(cmd):
-            raise SystemExit(1)
+        try:
+            if os.system(cmd):
+                raise SystemExit(1)
+        finally:
+            if os.path.exists(__v):
+                os.unlink(__v)
 
 
 class FlitPublishCommand(FlitCommand):
@@ -47,11 +54,19 @@ class FlitPublishCommand(FlitCommand):
     ]
 
     def run(self):
+        root = os.path.dirname(os.path.abspath(__file__))
+        __v = os.path.join(root, 'carson', '__v')
+        with open(__v, 'w') as writer:
+            writer.write(carson.get_version().described)
         cmd = f'flit publish --format {self.format}'
         if self.verbose:
             print(cmd)
-        if os.system(cmd):
-            raise SystemExit(1)
+        try:
+            if os.system(cmd):
+                raise SystemExit(1)
+        finally:
+            if os.path.exists(__v):
+                os.unlink(__v)
 
 
 class CleanCommand(Command):
@@ -67,6 +82,10 @@ class CleanCommand(Command):
     def run(self):
         path = os.path.dirname(os.path.abspath(__file__))
         dist_path = os.path.join(path, 'dist')
+
+        __v_path = os.path.join(path, 'carson', '__v')
+        if os.path.exists(__v_path):
+            os.unlink(__v_path)
 
         if os.path.isdir(dist_path):
             if self.verbose > 1:
@@ -84,7 +103,7 @@ class CleanCommand(Command):
 
 
 class VersionCommand(Command):
-    description = 'Print current version from versioneer'
+    description = 'Print current version'
     user_options = []
     verbose = 0
 
@@ -95,29 +114,17 @@ class VersionCommand(Command):
         pass
 
     def run(self):
-        vstr = '!!ERROR!!' if error else ''
-        if error and error is not True:
-            vstr += f'={error!r}'
-
-        vstr = f'{vstr} Version: {version!r}'.strip()
-        if self.verbose:
-            vstr += f'\n  full: {versions.get("full-revisionid")}'
-            vstr += f'\n  date: {versions.get("date")}'
-        print(vstr)
+        v = carson.get_version()
+        print(repr(v) if self.verbose else v)
 
 
-versions = versioneer.get_versions()
-version = versions.get('version')
-error = versions.get('error', True)
-dirty = versions.get('dirty')
-cmdclasses = versioneer.get_cmdclass()
-cmdclasses.update({
+cmdclasses = {
     'build': FlitBuildCommand,
     'publish': FlitPublishCommand,
     'upload': FlitPublishCommand,
     'clean': CleanCommand,
     'version': VersionCommand
-})
+}
 
 args = {
     'verbose': 0,
