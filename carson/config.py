@@ -29,8 +29,8 @@ _config['DEFAULT'] = {
     'expires_in': '',
     # 3888000
 
-    'log_dir': '',
-    'log_file': 'carson.log'
+    # 'log_dir': '',
+    # 'log_file': 'carson.log'
 }
 
 
@@ -45,7 +45,7 @@ def get(key, default=None):
 
     val = _config['carson'].get(key, default)
     if key == 'log_dir':
-        return _get_abspath(key, val)
+        return _get_abspath(key, val or '.')
 
     return val
 
@@ -85,7 +85,7 @@ def getint(key, default=None):
 def set(key, val):
     if not _config.sections():
         load()
-    _config['carson'][key] = str(val)
+    _config['carson'][key] = str(val) if val is not None else ''
     _write()
 
 
@@ -95,6 +95,12 @@ def setitems(items):
     """
     for key, val in items.items():
         set(key, val)
+
+
+def save(location=None):
+    global _path
+    _path = location or _path or os.path.expanduser('~/.carson')
+    _write()
 
 
 def _write():

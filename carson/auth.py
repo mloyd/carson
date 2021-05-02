@@ -3,15 +3,15 @@ This whole module and approach is a hack.  It's not well documented because it's
 the horse is out of the barn on this stuff and we have to do something.
 """
 
-import asyncio, base64, hashlib, random, re, string
+import base64, hashlib, random, re, string, ssl
 from urllib.parse import urlencode, urlparse, parse_qs
-from pprint import pformat
 
 import aiohttp
-from . import logging, __version__ as _version
+from . import logging as logger
+from ._version import get_version
+
 
 CHARS = f'{string.digits}{string.ascii_letters}'
-AUTH_URL = 'https://auth-global.tesla.com/oauth2/v3/authorize'
 
 # When parsing the HTML output of the login page
 RE_INPUT = re.compile(r'<\s*input\s+[^>]*>', re.IGNORECASE)
@@ -20,37 +20,21 @@ RE_VALUE = re.compile(r'value\s*=\s*"?(?P<value>[^ "]+)?', re.IGNORECASE)
 MAX_FIELDS = 50
 
 
-async def get_auth_data(identity, credential, logger=logging):
-    our_code, challenge1 = _get_challenge_pair()
-    _, challenge2 = _get_challenge_pair()
-    logger.debug('our_code=%r  challenge1=%r  challenge2=%r', our_code, challenge1, challenge2)
+async def get_auth_data(identity, credential):
+    our_code, challenge1, challenge2 = _get_challengers()
 
-    transaction_id = None  # Saved transaction ID to MFA
-
-    async with aiohttp.ClientSession(headers={'User-Agent': f'carson/{_version}'}) as session:
-        url, form = await get_login_page(session, challenge1, challenge2, logger)
-        logger.debug('url: %s', url)
-        logger.debug('form: %s', pformat(form))
-
-        creds = {'identity': identity, 'credential': credential}
-        issuer, their_code, redirect_uri = await post_credentials(session, url, form, creds, logger)
-        logger.debug('issuer=%s  their_code=%s  redirect_uri=%s', issuer, their_code, redirect_uri)
-
-        tokens = await post_grant_authorization_code(session, issuer, our_code, their_code, redirect_uri, logger)
-        logger.debug('tokens=%s', pformat(tokens))
-        state = tokens.get('state', None)
-        if not state == challenge2:
-            logger.error(f'Returned state ({state!r}) did not match expected value ({challenge2!r})')
-            raise Exception(f'Returned authorization_code state did not match expected value')
-
-        new_auth = await post_grant_jwt(session, tokens, logger)
-        logger.debug('new_auth=%s', pformat(new_auth))
-        return new_auth
+    v = f'carson/{get_version().version}'
+    async with aiohttp.ClientSession(headers={'User-Agent': v}) as session:
+        issuer, their_code, redirect_uri = await get_and_post_login_page(session, identity, credential, challenge1, challenge2)
+        tokens = await post_grant_authorization_code(session, issuer, our_code, their_code, redirect_uri, challenge2)
+        return tokens
 
 
-async def get_login_page(session, challenge1, challenge2, logger):
+async def get_and_post_login_page(session, identity, credential, challenge1, challenge2):
+    ssl_context = ssl.create_default_context()
+    ssl_context.maximum_version = ssl.TLSVersion.TLSv1_2
+
     query = {
-        'audience':              '',
         'client_id':             'ownerapi',
         'code_challenge':        challenge1,
         'code_challenge_method': 'S256',
@@ -61,54 +45,41 @@ async def get_login_page(session, challenge1, challenge2, logger):
         'scope':                 'openid email offline_access',
         'state':                 challenge2
     }
-    headers = {
-        'sec-fetch-site': 'none',
-        'sec-fetch-mode': 'navigate',
-        'sec-fetch-user': '?1',
-        'sec-fetch-dest': 'document'
-    }
 
-    request_url = f'{AUTH_URL}?{urlencode(query)}'
-    async with session.get(request_url, headers=headers) as response:
-        _debug_response(response, logger)
+    auth_url = 'https://auth-global.tesla.com/oauth2/v3/authorize'
+    request_url = f'{auth_url}?{urlencode(query)}'
+    response_url = None
+    login_form = {}
+    async with session.get(request_url, ssl=ssl_context) as response:
+        # _debug_response(response)
         response_url = f'{response.request_info.url}'
-        return response_url, parse_html(await response.text(errors='replace'))
+        login_form = parse_html(await response.text())
 
-
-async def post_credentials(session, url, form, creds, logger):
-    form.update(creds)
-    url_parts = urlparse(url)
-    headers = {
-        'sec-fetch-site': 'same-origin',
-        'sec-fetch-mode': 'navigate',
-        'sec-fetch-user': '?1',
-        'sec-fetch-dest': 'document',
-        'referer': url,
-        'origin': f'{url_parts.scheme}://{url_parts.netloc}',
-    }
-    async with session.post(url, headers=headers, data=form, allow_redirects=False) as response:
-        _debug_response(response, logger)
+    login_form.update({'identity': identity, 'credential': credential})
+    async with session.post(response_url, data=login_form, ssl=ssl_context, allow_redirects=False) as response:
+        # _debug_response(response)
         if 'location' not in response.headers:
             raise Exception('Did not get a redirect from posting credentials')
         if response.status not in (301, 302,):
             raise Exception('Did not get a HTTP 301/302 redirect from posting credentials')
         location = urlparse(response.headers['location'])
+        txt = await response.text()
 
-        txt = '' if not response.content_length else await response.text()
-        logger.debug('txt=%r', txt)
-        mfa = '/oauth2/v3/authorize/mfa/verify' in txt
-        assert not mfa, 'Not supporting MFA at this time.'
+    # logger.debug('txt=%r', txt)
+    mfa = '/oauth2/v3/authorize/mfa/verify' in txt
+    assert not mfa, 'Not supporting MFA at this time.'
 
-        query = parse_qs(location.query)
-        their_code = query.get('code', [None])[0]
-        if not their_code:
-            raise Exception(f'Did not get a code back from posting credentials.')
-        issuer = query.get('issuer', ['https://auth.tesla.com/oauth2/v3'])[0]
-        redirect_uri = f'{location.scheme}://{location.netloc}{location.path}'
-        return issuer, their_code, redirect_uri
+    query = parse_qs(location.query)
+    their_code = query.get('code', [None])[0]
+    issuer = query.get('issuer', [None])[0]
+    if not their_code:
+        raise Exception('Did not get a code back from posting credentials.')
+
+    redirect_uri = f'{location.scheme}://{location.netloc}{location.path}'
+    return issuer, their_code, redirect_uri
 
 
-async def post_grant_authorization_code(session, issuer, our_code, their_code, redirect_uri, logger):
+async def post_grant_authorization_code(session, issuer, our_code, their_code, redirect_uri, challenge2):
     form = {
         'grant_type': 'authorization_code',
         'client_id': 'ownerapi',
@@ -116,12 +87,17 @@ async def post_grant_authorization_code(session, issuer, our_code, their_code, r
         'code': their_code,
         'redirect_uri': redirect_uri
     }
-    async with session.post(f'{issuer}/token', json=form) as response:
-        _debug_response(response, logger)
-        return await response.json()
+    issuer = issuer or 'https://auth.tesla.com/oauth2/v3'
+    issuer_url = f'{issuer}/token'
 
+    async with session.post(issuer_url, json=form) as response:
+        tokens = await response.json()
 
-async def post_grant_jwt(session, tokens, logger):
+    if 'state' not in tokens or str(tokens['state']) != challenge2:
+        logger.error(f'Returned state ({tokens.get("state", None)!r}) did not match expected value ({challenge2!r})')
+        raise Exception('Returned authorization_code state did not match expected value')
+
+    # post_grant_jwt
     url = 'https://owner-api.teslamotors.com/oauth/token'
     headers = {'Authorization': f'Bearer {tokens.get("access_token")}'}
     form = {
@@ -129,7 +105,7 @@ async def post_grant_jwt(session, tokens, logger):
         'client_id': _DISCOVERED_VAL,
     }
     async with session.post(url, headers=headers, json=form) as response:
-        _debug_response(response, logger)
+        # _debug_response(response)
         return await response.json()
 
 
@@ -157,12 +133,14 @@ def parse_html(body_src):
     return form
 
 
-def _get_challenge_pair():
+def _get_challengers():
     code = ''.join(random.choices(CHARS, k=112))
     sha = hashlib.sha256()
     sha.update(code.encode())
-    challenge = base64.b64encode(sha.digest(), altchars=b'-_').decode().replace('=', '')
-    return code, challenge
+    challenge1 = base64.b64encode(sha.digest(), altchars=b'-_').decode().replace('=', '')
+    sha.update(''.join(random.choices(CHARS, k=112)).encode())
+    challenge2 = base64.b64encode(sha.digest(), altchars=b'-_').decode().replace('=', '')
+    return code, challenge1, challenge2
 
 
 _DISCOVERED_VAL = ''.join(hex(int(val))[2:] for val in """
@@ -177,23 +155,7 @@ _DISCOVERED_VAL = ''.join(hex(int(val))[2:] for val in """
 """.split())
 
 
-def _debug_response(response, logger):
-    if not logging.is_debug_enabled():
-        return
-    logger.debug(('=' * 80))
-    logger.debug('_debug_response(response)')
-    if response.request_info.method == 'POST':
-        for name, obj in (('response', response), ('response.request_info', response.request_info),):
-            logger.debug(name)
-            for attr in dir(obj):
-                if attr.startswith('_'):
-                    continue
-                val = repr(getattr(obj, attr))
-                val = val[:200] if len(val) > 200 else val
-                val = val.replace('\n', '\\n')
-                logger.debug(f'{attr: <30} {val}')
-            logger.debug(f'end of {name}')
-            logger.debug('')
+def _debug_response(response):
     req = response.request_info
     logger.debug('Request')
     logger.debug(f'{req.method} {req.url}')

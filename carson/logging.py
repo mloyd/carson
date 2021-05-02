@@ -2,6 +2,8 @@
 import sys
 import os
 import logging
+import shutil
+import inspect
 
 from . import config
 
@@ -19,10 +21,11 @@ def initLogging(debug=False):
     _debug = debug
 
     formatter = logging.Formatter('{asctime} {levelname[0]} {name}  {message}', style='{')
-    handlers = [
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler(os.path.join(config.get('log_dir'), config.get('log_file')))
-    ]
+    handlers = [logging.StreamHandler(sys.stdout)]
+    ldir, lfile = config.get('log_dir'), config.get('log_file')
+    if ldir and lfile:
+        handlers.append(logging.FileHandler(os.path.join(ldir, lfile)))
+
     for handler in handlers:
         logger.addHandler(handler)
         handler.setLevel(logging.DEBUG)
@@ -62,56 +65,119 @@ def debug(*args, **kwargs):
     log(logging.DEBUG, *args, **kwargs)
 
 
-def logobject(obj, name='obj', everything=False, width=120, limit=320):
-    logDivider('-', half=True)
-    logger.info(f'_logobject(name={name} type={obj.__class__.__module__}.{obj.__class__.__name__})')
-    logDivider('-', half=True)
-    printedSomething = False
-    for attr in dir(obj):
-        if not everything and attr.startswith('_'):
+COLS, ROWS = shutil.get_terminal_size((120, 80))
+COLS -= 35
+NoneType = type(None)
+
+
+def logobject(obj, name=None, logger=print, multi_line_doc=False):
+    debug = logger
+    if hasattr(debug, 'debug'):
+        debug = debug.debug
+
+    debug(f'{"=" * 5} {name or "logobj"} {"=" * COLS * 2}'[:COLS])
+    otype = type(obj)
+    otname = f'{otype.__module__}.{otype.__name__}'
+    debug(f'obj {otname}')
+    try:
+        debug(f'file: {inspect.getfile(otype)}')
+    except TypeError:
+        pass
+
+    doc = (
+        inspect.getdoc(otype)
+        or inspect.getcomments(otype)
+        or inspect.getcomments(obj)
+        or 'No doc or coment'
+    )
+    if '\n' in doc:
+        doc = '\n'.join(f'  {ln}' for ln in doc.split('\n'))
+    debug(doc)
+
+    gentle_items = {
+        'aiohttp.client_reqrep.ClientResponse': ['ok']
+    }
+
+    members = [
+        (attr, getattr(obj, attr))
+        for attr in dir(obj)
+        if not attr.startswith('__')
+        and attr not in gentle_items.get(otname, [])
+    ]
+
+    gutter = max(20, max(len(attr) for attr, val in members) if members else 20)
+
+    is_a_funcs = [
+        (name[2:], func)
+        for name in dir(inspect)
+        if name.startswith('is')
+        and (func := getattr(inspect, name))  # noqa
+        and inspect.isfunction(func)          # noqa
+    ]
+    for attr, val in members:
+        val = 'gentle' if attr in gentle_items else val
+        line = f'{attr: <{gutter}}'
+        val_type = type(val)
+        mname = val_type.__module__
+        tname = val_type.__name__ if val_type.__name__ not in ('builtin_function_or_method',) else ''
+        type_desc = f'{mname}.' if mname != 'builtins' else ''
+        type_desc += tname
+
+        if val_type in (NoneType, bool, int):
+            line += repr(val)
+            debug(line[:COLS])
             continue
-        printedSomething = True
-        try:
-            attrstr = f'{getattr(obj, attr)!r}'.replace('\n', '\\n')
-        except Exception as otherError:
-            attrstr = f'otherError = {otherError!r}'
-        if len(attrstr) > limit:
-            attrstr = f'{attrstr[:limit - 3]}...'
 
-        extra = ''
-        if len(attrstr) > width:
-            extra = attrstr[width:]
-            attrstr = attrstr[:width]
-        logger.info(f'{attr: <20}  {attrstr}')
-        while extra:
-            attr = ''
-            logger.info(f'{attr: <20}  {extra[:width]}')
-            if len(extra) > width:
-                extra = extra[width:]
-            else:
-                extra = ''
-    if not printedSomething:
-        logger.info(f'Nothing to log for {name}.')
-    logger.info(f'end of _logobject')
+        if val_type in (str,) or type_desc in ('yarl.URL'):
+            line += f'{str(val)!r}'
+            debug(line[:COLS])
+            continue
 
+        isables = ', '.join(name for name, func in is_a_funcs if func(val))
+        if isables:
+            line += f'({isables}) '
 
-_divider_width = None
-def logDivider(divider='=', half=False):  # noqa E302
-    global _divider_width
-    if _divider_width is None:
-        try:
-            # Try to find a console StreamHandler in the logger handlers.  If found, get its formatter and find the prefix length
-            handlers = sorted(logger.handlers, key=lambda h: hasattr(h, 'stream') and hasattr(h.stream, 'name') and ('stdout' in h.stream.name or 'stderr' in h.stream.name))
-            formatter = handlers[0].formatter
-            prefix = formatter.format(logging.LogRecord(name=logger.name, level=logging.INFO, pathname='', lineno=1234, msg='', args=[], exc_info=None))
+        if type_desc not in isables:
+            line += type_desc + ' '
 
-            # Calling get_terminal_size on redirected output may raise OSError.  Regardless
-            # of what it may raise, just pass on it and use something default.
-            _divider_width = os.get_terminal_size().columns
+        if isinstance(val, dict):
+            line += '{'
+            entries = []
+            for dkey, dval in val.items():
+                parts = []
+                for part in (dkey, dval):
+                    if isinstance(part, (NoneType, str, int)):
+                        parts.append(repr(part))
+                    else:
+                        parts.append(type(part).__name__)
+                entries.append(':'.join(parts))
+            line += ', '.join(entries)
+            line += '}'
+        elif isinstance(val, (list, set, tuple)):
+            line += '('
+            line += ', '.join(
+                repr(part)
+                if isinstance(part, (NoneType, str, int))
+                else type(part).__name__
+                for part in val
+            )
+            line += ')'
+        else:
+            doc = (
+                inspect.getdoc(val)
+                or inspect.getcomments(val)
+                or ''
+            ).strip()
+            if doc:
+                doc = doc.split('\n')
+                line += ': ' + doc[0]
+                doc = doc[1:] if multi_line_doc else []
+                while doc:
+                    if line[:COLS].strip():
+                        debug(line[:COLS])
+                    line = f'{" ": <{gutter}}' + doc[0]
+                    doc = doc[1:]
 
-            # Subtract the length of the prefix from the console column width
-            _divider_width -= len(prefix)
-        except:  # noqa E722
-            _divider_width = 200
+        debug(line[:COLS])
 
-    logger.info(divider * (int(_divider_width * .5) if half else _divider_width))
+    debug(f'{"=" * 50}')

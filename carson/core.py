@@ -216,14 +216,16 @@ class Session:
             raise TeslaCredentialError(f'Cannot login.  Missing attributes: {missing}.')
 
         try:
-            new_auth = await auth.get_auth_data(self.email, self.password, logger=self.logger)
+            new_auth = await auth.get_auth_data(self.email, self.password)
         except Exception:
             self.logger.error('Could not authenticate.', exc_info=True)
             raise TeslaCredentialError()
 
         newdata = {k: new_auth.get(k) for k in self.auth if k in new_auth}
         self.auth.update(newdata)
+        config.set('email', self.email)
         config.setitems(self.auth)
+        config.save()
         self._session = self._create_session(access_token=self.auth.get('access_token'))
 
     async def vehicles(self, *, name=None, cache=True):
