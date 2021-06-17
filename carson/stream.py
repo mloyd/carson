@@ -50,11 +50,7 @@ async def stream(car, *, callback=None):
     # `cols` will be the payload list/order in which we want the data.  We don't send `timestamp` in
     # the outbound payload.  But we have here because it does come back in each data:update record.
     # We act on the `shift_state` value so we need to save the index of its location.
-    cols = """
-        timestamp
-        speed odometer soc elevation est_heading est_lat
-        est_lng power shift_state range est_range heading
-    """.split()
+    cols = list(STREAM_COLUMNS.keys())
 
     while user_present:
         iteration += 1
@@ -454,14 +450,6 @@ STREAM_COLUMNS = {
     'est_heading': 'integer',
     # This is the proper navigational 'heading' or 'Yaw' which is the direction the car is pointed.
 
-    'heading': 'integer',
-    # In contrast, the term 'heading' here refers to navigational term 'course' meaning the direction the car is
-    # actually travelling.  This value represents the last course when the car was in motion.
-    #
-    # Example est_heading/heading: 185/357
-    # I back in to my garage because of where my charger is located.  So its nose is looking nearly due-south.  But the
-    # heading (a.k.a course) is nearly due north because my speed was backing in.
-
     'est_lat': 'real',
     # Approximate latitude in decimal notation.
 
@@ -472,4 +460,12 @@ STREAM_COLUMNS = {
     'shift_state': 'string',
     'range': 'integer',
     'est_range': 'integer',
+
+    'heading': 'integer',
+    # In contrast, the term 'heading' here refers to navigational term 'course' meaning the direction the car is
+    # actually travelling.  This value represents the last course when the car was in motion.
+    #
+    # Example est_heading/heading: 185/357
+    # I back in to my garage because of where my charger is located.  So its nose is looking nearly due-south.  But the
+    # heading (a.k.a course) is nearly due north because my speed was backing in.
 }
