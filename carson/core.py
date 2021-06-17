@@ -590,8 +590,7 @@ class Vehicle:
             'in_service': False,
             'vehicle_state.is_user_present': False,
             'vehicle_state.sentry_mode': False,
-            'charge_state.charging_state': 'Stopped',
-            # 'charge_state.time_to_full_charge': 0
+            'charge_state.time_to_full_charge': 0
         }
 
         formatters = {
