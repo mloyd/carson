@@ -1,7 +1,7 @@
 
 import asyncio, re
 from base64 import b64encode
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from aiohttp import WSMsgType
 
 from . import logging, utils
@@ -372,7 +372,7 @@ class Waypoint:
         val = Waypoint._parse_int(val)
         if val > 9_999_999_999:
             val *= .001
-        ts = datetime.fromtimestamp(val)
+        ts = datetime.fromtimestamp(val, tz=timezone.utc)
         if minimum is not None and ts < minimum:
             raise ValueError('Value {ts} is less than minimum ({minimum})')
         if maximum is not None and ts > minimum:
