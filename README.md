@@ -66,22 +66,22 @@ You can see that two requests are made:
 
 ### OAuth
 
-If you already have (or know how to generate) an `auth_token` or simply do not want to provide your Tesla account's
+If you already have (or know how to generate) an `access_token` or simply do not want to provide your Tesla account's
 email and password, you can instead provide your token.  Simply replace the arguments `email` and `password` passed to
-the `Session` constructor with the argument `access_token` (or `--auth-token` if using the command line).  Your auth
+the `Session` constructor with the argument `access_token` (or `--access-token` if using the command line).  Your auth
 token should resemble a long list of characters similar to the following:
 
 `0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b`
 
 Example:
 ```console
-> python -m carson --auth-token 0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b
+> python -m carson --access-token 0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b
 ```
 
 Example:
 ```python
 ...
-async with Session(auth_token='0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b') as session:
+async with Session(access_token='0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b2c3d4e5f0a1b') as session:
 ...
 ```
 
@@ -100,11 +100,11 @@ Credentials can also be stored in configuration.  `carson` looks for credentials
 
 ### Credential Precedence
 
-Credentials (`password` and `auth_token`) are used in the following order of precedence.  When reading _'if'_ and
+Credentials (`password` and `access_token`) are used in the following order of precedence.  When reading _'if'_ and
 _'if not'_, think Python boolean operations (e.g. `''`, `None`, `0` are all `False`).
 
 1.  If `password` is given to the `Session` constructor, it will always be used to generate a new oauth token.  Even if
-    a valid `auth_token` is given to the `Session` constructor at the same time.  This means a value for `email` must
+    a valid `access_token` is given to the `Session` constructor at the same time.  This means a value for `email` must
     also be given (or implied from config).
 2.  If `password` is not given to the `Session` constructor, the value used for `access_token` is used.  Or, if not
     given, implied from config.
