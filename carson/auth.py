@@ -21,6 +21,19 @@ MAX_FIELDS = 50
 
 
 async def get_auth_data(identity, credential):
+    """
+    Accepts identity (a.k.a email) and credential (a.k.a password) and returns your tokens.  This
+    currently does not support mfa.
+
+    Returns:
+        dict {
+            "access_token": "<access_token>",
+            "token_type": "bearer",
+            "expires_in": <seconds>,  # Have only seen 45 days
+            "refresh_token": "<refresh_token>",
+            "created_at": <epoch>
+        }
+    """
     our_code, challenge1, challenge2 = _get_challengers()
 
     v = f'carson/{get_version().version}'
