@@ -33,5 +33,6 @@ def json_loads(txt):
     return json.loads(txt, object_hook=_json_timestamp_decoder)
 
 
-def json_dumps(obj):
-    return json.dumps(obj, cls=JSONEncoderHelper)
+def json_dumps(obj, *args, **kwargs):
+    kwargs['cls'] = JSONEncoderHelper
+    return json.dumps(obj, *args, **kwargs)
