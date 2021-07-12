@@ -620,9 +620,12 @@ class Vehicle:
                     val = getattr(obj, attr)
 
                 # If it's a default value we don't want to display in the repr
-                # value, just skip it.
-                if val == unless_eq:
+                # value, just skip it.  This could be either an exact match `val == unless_eq` or
+                # if `unless_eq` is a tuple and `val in unless_eq`
+                if val == unless_eq or isinstance(unless_eq, (list, tuple)) and val in unless_eq:
                     continue
+
+                # If it's a default value
 
                 # Otherwise repr the pair or use formatter (if given).
                 val = fmt(val) if fmt else f'{attr}={val!r}'
@@ -719,7 +722,7 @@ class Vehicle:
         """
         # curl -i --oauth2-bearer 99***7c  https://owner-api.teslamotors.com/api/1/vehicles/12345678901234567/vehicle_data
 
-        if self.state not in('online', 'wakeup'):
+        if self.state not in ('online', 'wakeup'):
             raise VehicleStateError('Car is not online.', state=self.state)
 
         attempts = 20 if self.state == 'wakeup' else 3
