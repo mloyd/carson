@@ -44,6 +44,8 @@ async def get_auth_data(identity, credential):
 
 
 async def get_and_post_login_page(session, identity, credential, challenge1, challenge2):
+
+    # TODO: At one time, capping TLS to 1.2 was required but this is probably not needed anymore.
     ssl_context = ssl.create_default_context()
     ssl_context.maximum_version = ssl.TLSVersion.TLSv1_2
 
@@ -71,14 +73,16 @@ async def get_and_post_login_page(session, identity, credential, challenge1, cha
     login_form.update({'identity': identity, 'credential': credential})
     async with session.post(response_url, data=login_form, ssl=ssl_context, allow_redirects=False) as response:
         # _debug_response(response)
-        if 'location' not in response.headers:
-            raise Exception('Did not get a redirect from posting credentials')
-        if response.status not in (301, 302,):
-            raise Exception('Did not get a HTTP 301/302 redirect from posting credentials')
-        location = urlparse(response.headers['location'])
+        _loc = response.headers.get('location')
         txt = await response.text()
 
-    # logger.debug('txt=%r', txt)
+    if not _loc:
+        if 'captcha' in txt:
+            raise Exception('Looks like captcha is required.')
+        raise Exception('Did not get a redirect from posting credentials')
+
+    location = urlparse(_loc)
+
     mfa = '/oauth2/v3/authorize/mfa/verify' in txt
     assert not mfa, 'Not supporting MFA at this time.'
 
