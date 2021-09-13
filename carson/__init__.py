@@ -15,6 +15,16 @@ __email__ = 'michael@loyd.org'
 __license__ = 'MIT'
 __copyright__ = "Copyright 2021 %s" % __author__
 
+
+try:
+    # To deal with an annoying event loop implementation differences.  That's right, Windows, I'm
+    # looking right at you buddy.
+    import platform, importlib
+    importlib.import_module(f'.plat.{platform.system()}', package=__name__)
+except ModuleNotFoundError:
+    pass
+
+
 from .core import Session
 from .core import TeslaCredentialError
 from .core import VehicleStateError
