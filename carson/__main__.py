@@ -1,15 +1,21 @@
-
+import sys
 import argparse
 import asyncio
 import warnings
 
 from getpass import getpass
 
-from . import auth, logging, utils, Session, get_version
+from . import auth, logging, utils, Session
+from . import __version__ as _version
 
 
-def main():
-    parser = argparse.ArgumentParser('carson', description=f'Command line utility for carson/{get_version()}.')
+def main(*args):
+    if not args:
+        args = sys.argv
+        if args and args[0].endswith('__main__.py'):
+            args = args[1:]
+
+    parser = argparse.ArgumentParser('carson', description=f'Command line utility for carson/{_version}.')
     creds = parser.add_argument_group('Credentials')
     creds.add_argument('--email', '-e', metavar='', help='The email associated with your Tesla account.')
     creds.add_argument('--password', '-p', metavar='', help='Leave this blank so you can be prompted securely.')
@@ -27,10 +33,10 @@ def main():
     misc = parser.add_argument_group('Misc')
     misc.add_argument('--version', default=False, action='store_true', help='Prints version and exits')
     misc.add_argument('--verbose', '-v', default=0, action='count')
-    args = parser.parse_args()
+    args = parser.parse_args(args)
 
     if args.version:
-        print(f'carson-{get_version()}')
+        print(f'carson-{_version}')
         return
 
     if args.no_wake:

@@ -12,8 +12,8 @@ from pprint import pformat
 
 import aiohttp
 
-from . import config, logging, auth, utils, endpoints, get_version
-
+from . import config, logging, auth, utils, endpoints
+from . import __version__ as _version
 
 LEGACY_ATTRIBUTES = """
     [legacy]
@@ -170,7 +170,7 @@ class Session:
         return buf + '>'
 
     def _create_session(self, access_token=None):
-        default_headers = {'User-Agent': f'carson/{get_version()}'}
+        default_headers = {'User-Agent': f'carson/{_version}'}
         if access_token:
             default_headers['Authorization'] = f'Bearer {access_token}'
             if self.verbose > 2:

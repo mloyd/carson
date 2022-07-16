@@ -8,8 +8,7 @@ from urllib.parse import urlencode, urlparse, parse_qs
 
 import aiohttp
 from . import logging as logger
-from ._version import get_version
-
+from . import __version__ as _version
 
 CHARS = f'{string.digits}{string.ascii_letters}'
 
@@ -36,7 +35,7 @@ async def get_auth_data(identity, credential):
     """
     our_code, challenge1, challenge2 = _get_challengers()
 
-    v = f'carson/{get_version().version}'
+    v = f'carson/{_version}'
     async with aiohttp.ClientSession(headers={'User-Agent': v}) as session:
         issuer, their_code, redirect_uri = await get_and_post_login_page(session, identity, credential, challenge1, challenge2)
         tokens = await post_grant_authorization_code(session, issuer, our_code, their_code, redirect_uri, challenge2)

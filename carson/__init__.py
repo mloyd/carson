@@ -1,18 +1,19 @@
-
-"""An asyncio package to interact with the Tesla JSON web service."""
+"""
+An asyncio package to interact with the Tesla JSON web service.
+"""
 
 # flake8: noqa
 
-__title__ = 'carson'
+# __name__ = 'carson'
+# __package__ = __name__
 
-from ._version import get_version
-__version__ = get_version().pipversion
-__summary__ = 'An asyncio package to interact with the Tesla JSON web service.'
-__uri__ = 'https://github.com/mloyd/carson'
-__author__ = 'Michael Loyd'
-__email__ = 'michael@loyd.org'
+from importlib.metadata import distribution
 
+__version__ = distribution(__package__).metadata['Version']
 __license__ = 'MIT'
+__url__ = 'https://github.com/mloyd/carson'
+__author__ = 'Michael Loyd'
+__author_email__ = 'michael@loyd.org'
 __copyright__ = "Copyright 2021 %s" % __author__
 
 
@@ -20,7 +21,7 @@ try:
     # To deal with an annoying event loop implementation differences.  That's right, Windows, I'm
     # looking right at you buddy.
     import platform, importlib
-    importlib.import_module(f'.plat.{platform.system()}', package=__name__)
+    importlib.import_module(f'.plat.{platform.system()}', package=__package__)
 except ModuleNotFoundError:
     pass
 
