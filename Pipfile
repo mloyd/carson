@@ -7,13 +7,15 @@ name = "pypi"
 aiohttp = "*"
 
 [dev-packages]
+carson = {editable = true, path = "."}
+setuptools-scm = {extras = ["toml"], version = ">=7.1"}
 rope = "*"
 yapf = "*"
 flake8 = "*"
+twine = "*"
 
 [scripts]
-build = "python -m pip wheel --no-deps --wheel-dir ./dist ./"
+build = "python -m pip wheel --no-deps --wheel-dir dist ."
 
 [requires]
-python_version = "3.10"
-
+python_version = "3"

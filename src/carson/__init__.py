@@ -7,15 +7,23 @@ An asyncio package to interact with the Tesla JSON web service.
 # __name__ = 'carson'
 # __package__ = __name__
 
-from importlib.metadata import distribution
+from importlib.metadata import distribution, PackageNotFoundError
 
-__version__ = distribution(__package__).metadata['Version']
+__version__ = '0.0.0'
 __license__ = 'MIT'
 __url__ = 'https://github.com/mloyd/carson'
 __author__ = 'Michael Loyd'
 __author_email__ = 'michael@loyd.org'
 __copyright__ = "Copyright 2021 %s" % __author__
 
+try:
+    _dist = distribution(__package__)         # Could raise PackageNotFoundError
+    _summary = _dist.metadata['Summary']      # Could return None if not build with a summary
+    _version = _summary.split(' ', 1)[0]      # 'Version=1.2.3+b8-1a146aa  Description=An asynci...'
+    __version__ = _version.split('=', 1)[-1]  # 'Version=1.2.3+b8-1a146aa
+except (PackageNotFoundError, AttributeError):
+    # AttributeError is if metadata was build without a description (a.k.a. Summary is missing)
+    __version__ += '-unsupported'
 
 try:
     # To deal with an annoying event loop implementation differences.  That's right, Windows, I'm
