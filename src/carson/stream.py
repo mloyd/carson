@@ -186,9 +186,7 @@ async def next_message(reader):
     except asyncio.exceptions.TimeoutError:
         logging.debug('Timeout waiting for next message.')
     except Exception as err:
-        logging.error('Unknown error while waiting for next message: %s', err, exc_info=True)
-        if logging.is_debug_enabled():
-            logging.logobject(err)
+        logging.error('Unhandled error while waiting for next message: %s', err, exc_info=True)
         raise
 
     return data

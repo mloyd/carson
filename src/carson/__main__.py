@@ -3,10 +3,7 @@ import argparse
 import asyncio
 import warnings
 
-from getpass import getpass
-
-from . import auth, logging, utils, Session
-from . import __version__ as _version
+from carson import Session, logging
 
 
 def main(*args):
@@ -15,12 +12,11 @@ def main(*args):
         if args and args[0].endswith('__main__.py'):
             args = args[1:]
 
-    parser = argparse.ArgumentParser('carson', description=f'Command line utility for carson/{_version}.')
+    from carson import __version__
+    version = f'carson/{__version__}'
+    parser = argparse.ArgumentParser('carson', description=f'Command line utility for {version}')
     creds = parser.add_argument_group('Credentials')
-    creds.add_argument('--email', '-e', metavar='', help='The email associated with your Tesla account.')
-    creds.add_argument('--password', '-p', metavar='', help='Leave this blank so you can be prompted securely.')
-    creds.add_argument('--token', dest='access_token', metavar='TOKEN', help='An access token that can be used in lieue of email/password.')
-    creds.add_argument('--token-only', default=False, action='store_true', help='Use credentials ONLY to create an access token, display it, and exit.')
+    creds.add_argument('--token', dest='access_token', metavar='TOKEN', help='Access token to authenticate to Tesla.')
 
     actions = parser.add_argument_group('Queries/Actions')
     actions.add_argument('--list', '-l', default=False, action='store_true', help='List vehicles associated with the account and exit.')
@@ -34,51 +30,36 @@ def main(*args):
     misc.add_argument('--version', default=False, action='store_true', help='Prints version and exits')
     misc.add_argument('--verbose', '-v', default=0, action='count')
     args = parser.parse_args(args)
+    logging.initLogging(debug=args.verbose)
 
     if args.version:
-        print(f'carson-{_version}')
-        return
+        print(version)
+        raise SystemExit(0)
 
+    args.list |= not any([args.command, args.stream, args.name])
     if args.no_wake:
         warnings.warn('The --no-wake argument is deprecated.  You can explicitly wake using the --wake argument.')
         if args.wake:
             raise SystemExit('Cannot specify both --wake and --no-wake')
 
-    if not any([args.list, args.command, args.stream, args.name, args.token_only]):
-        return parser.print_help()
-
-    logging.initLogging(debug=args.verbose)
     try:
         asyncio.run(start(args), debug=args.verbose)
-    except Exception as err:
-        print(err, '\n')
-        parser.print_help()
     except KeyboardInterrupt:
         pass
 
 
 async def start(args):
 
-    if args.token_only:
-        if not args.email:
-            raise SystemExit('If you use --token-only, you must provide an email/password.')
-        pwd = args.password or getpass(f'Password for {args.email}: ')
-        try:
-            response = await auth.get_auth_data(args.email, pwd)
-            print(utils.json_dumps(response, indent=2))
-            raise SystemExit()
-        except Exception as err:
-            raise SystemExit(f'Encountered an error: {err}')
-
-    session = Session(email=args.email, password=args.password, access_token=args.access_token, verbose=args.verbose)
-    if session.email and not session.password and not session.access_token:
-        session.password = getpass(f'Password for {session.email}: ')
-    try:
-
-        result = await session.vehicles(name=args.name) if args.name or args.list else await session.car
+    async with Session(access_token=args.access_token, verbose=args.verbose) as session:
+        if not session.access_token:
+            raise SystemExit('You must provide access token or set environment variable CARSON_ACCESS_TOKEN.')
+        result = await (
+            session.vehicles(name=args.name)
+            if args.name or args.list
+            else session.car
+        )
         if not result:
-            logging.error('Nothing associated with this account!')
-            return
+            raise SystemExit('Nothing associated with this account!')
 
         if args.list or isinstance(result, list):
             result = result if isinstance(result, list) else [result]
@@ -116,9 +97,6 @@ async def start(args):
             else:
                 logging.info('Result of %r is %s', cmd, func)
 
-    finally:
-        await session.close()
-
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

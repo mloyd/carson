@@ -4,10 +4,10 @@
 [![Latest Version][pypi-image]][pypi-url]
 
 * [Overview](#overview)
-* [States And Commands](#states-and-commands)
+* [Authentication](#authentication)
 * [Configuration](#configuration)
+* [States And Commands](#states-and-commands)
 * [Streaming](#streaming)
-* [Pythonic Features](#features)
 
 ## Overview
 
@@ -19,10 +19,8 @@ generates.  Lots of work to discover and document the API was done by Tim Dorr a
 Among the goals for this project is to have an [`asyncio`](https://docs.python.org/3/library/asyncio.html) based
 library.  As a result, Python 2 is not supported.  In fact, it seems like it has been a decade since the *provisional*
 tag was removed from the `asyncio` library because it has evolved so much.  There are many guides, articles, and posts
-based on early features of `asyncio`.  The best way to stay up to date is by starting with Python's documentation at
-[https://docs.python.org/library/asyncio.html](https://docs.python.org/library/asyncio.html).  This project uses the
-`async`/`await` syntax introduced in [PEP-492](https://www.python.org/dev/peps/pep-0492/).  As of this writing, the
-latest version of Python is 3.8.1.
+based on early features of `asyncio`.  The best way to stay up to date is by starting with Python's standard library
+documentation for [`asyncio`](https://docs.python.org/3/library/asyncio.html).
 
 ### Dependencies
 
@@ -30,70 +28,14 @@ There is one dependency for basic usage &mdash; [`aiohttp`](https://docs.aiohttp
 
 ## Authentication
 
-Tesla has made authentication a moving target.  It's a bit like playing whack-a-mole.  Understandably so because
-security should always be job zero in any computing effort.  And all 3rd party libraries not developed by Tesla are
-unofficial.  Perhaps this recent variability is a sign of an impending App Store?  I don't know... just speculating.
-But _authentication_ is not a goal of this library.
+This project is *BYOT* (bring your own token) only.  OAuth 2.0 and authentication flows are **not** goals of this
+project.   There are many apps and utilities that provide this if you need help creating access and/or refresh tokens to
+use Tesla's API.  Refer to the [configuration](#configuration) section for information on how to use this with `carson`.
 
-Below are a few mechanisms to try to successfully authenticate.  Your results may vary depending on a number of factors.
-Like most network service based apps, Tesla employ's DNS traffic policies with weighted and geo values (among others)
-which means you might or might not be presented with captcha during password authentication.
+## Configuration
 
-### BYOT
-
-The easiest and most reliable method is to bring your own access token.  Both the command line utility and `Session`
-class accept an access token instead of email/password.  If you want to use environment variables or a configuration
-file to supply your access token, see the [configuration](#configuration) section below for more information.
-
-### Email & Password
-
-Both the command line utility and `Session` class will accept `email` and `password` arguments.  They will be used to
-generate an access token.  Examples include:
-
-```console
-> python -m carson --email nikola@tesla.com --password electricity --list
-Car #1 Vehicle('Antares' state='asleep' id=123..789)
-Car #2 Vehicle('Dark Nebula' state='asleep' id=321..987)
-```
-A better practice to keep from leaking your password into your shell history is to leave `--password` off and let the
-command line utility securely prompt you for it.  Example:
-
-```console
-> python -m carson --email nikola@tesla.com --list
-Password for nikola@tesla.com:
-Car #1 Vehicle('Antares' state='asleep' id=123..789)
-Car #2 Vehicle('Dark Nebula' state='asleep' id=321..987)
-```
-
-### Generate Your Own
-
-The command line utility can be used to generate an access token that you can then save securely for future use.  Add
-the `--token-only` option as show below:
-```console
-> python -m carson --email nikola@tesla.com --token-only
-Password for nikola@tesla.com:
-{
-  "access_token": "qts-0a1b2c...5f0a1b",
-  "token_type": "bearer",
-  "expires_in": 3888000,
-  "refresh_token": "b1a0f5...c2b1a0",
-  "created_at": 1626183175
-}
-```
-
-your own Credentials can be provided and `carson` will attempt to create an access token for you.
-
-If you already have (or know how to generate) an `access_token` or simply do not want to provide your Tesla account's
-email and password, you can instead provide your token.  Simply replace the arguments `email` and `password` passed to
-the `Session` constructor with the argument `access_token` (or `--access-token` if using the command line).  Your token
-should resemble a long list of characters similar to `qts-0a1b2c...5f0a1b`.
-
-Example:
-```python
-...
-async with Session(access_token='qts-0a1b2c...5f0a1b') as session:
-...
-```
+Tokens can be configured via environment variables or passed as arguments to the constructor.  Token values passed as
+arguments take priority over environment variables.
 
 ## States And Commands
 
@@ -103,59 +45,50 @@ With its most basic usage, you can use `carson` to get the current state of car 
 >>>import asyncio
 >>>from carson import Session
 >>>async def main():
-...    name = 'Dark Nebula'
-...    async with Session(email='nikola@tesla.com', password='electricity') as session:
-...        car = await session.vehicles(name)
-...        print(f'{name} is {car.state!r}')
+...    async with Session() as session:
+...        car = await session.vehicle
+...        print(f'{car.name} is {car.state!r}')
 
 >>>asyncio.run(main())
 Dark Nebula is 'asleep'
 ```
 
 Or you can run it from the command line in a similar fashion:
+
 ```console
-> python -m carson -v --email nikola@tesla.com --password electricity --display-name "Dark Nebula"
+> python -m carson --name "Dark Nebula"
+```
+
+If you have more than one vehicle and want to specify which car to show, you can pass `--name` to disambiguate which car
+you want to show.  Otherwise, `carson` will return the most recent vehicle listed on your account.
+
+```console
+> python -m carson --name "Dark Nebula"
+```
+
+To list all cars and their respective status, you can use `--list` to see them all.
+
+```console
+> python -m carson --list
 ```
 
 To get a sense of what is happening, you can add verbose and see the requests being made.
+
 ```console
-> python -m carson -v --email nikola@tesla.com --password electricity --display-name "Dark Nebula"
-2020-01-01 10:45:59,418 D carson  Performing OAuth password grant for email='nikola@tesla.com'
-2020-01-01 10:46:00,229 D carson  Req# 1:  Method=POST url='https://owner-api.teslamotors.com/oauth/token?grant_type=password' status=200 duration=0:00:00.810031
+> python -m carson -v --name "Dark Nebula"
 2020-01-01 10:46:00,943 D carson  Req# 2:  Method=GET url='https://owner-api.teslamotors.com/api/1/vehicles' status=200 duration=0:00:00.712868
 2020-01-01 10:46:00,944 I carson  Vehicle('Dark Nebula' state='asleep')
 ```
 
-You can see that two requests are made:
+From this point, you can imagine any kind of state query or command supported by Tesla's API can be queried or invoked.
 
-  1.  First is to generate an `oauth` token which is required for all subsequent requests.
-  2.  Get a list of vehicles associated with the credentials provided.
+```console
+> python -m carson --command wake_up
+> python -m carson --command door_lock
+```
 
-## Configuration
-
-Credentials can also be stored in configuration.  `carson` looks for credentials in the following order:
-
-1.  The arguments `email` and `password` passed to the `Session` constructor.
-2.  The argument `access_token` passed to the `Session` constructor.
-3.  The environment variables `CARSON_EMAIL`, `CARSON_PASSWORD`, `CARSON_ACCESS_TOKEN`.
-4.  An `.ini` style config file named `.carson` or `carson.ini` in the user's home directory.
-
-> **Regarding credentials:** Always use care when storing credentials.  Sometimes
-> [bad things](https://www.diogomonica.com/2017/03/27/why-you-shouldnt-use-env-variables-for-secret-data/)
-> can happen and often time will.
-
-### Credential Precedence
-
-Credentials (`password` and `access_token`) are used in the following order of precedence.  When reading _'if'_ and
-_'if not'_, think Python boolean operations (e.g. `''`, `None`, `0` are all `False`).
-
-1.  If `password` is given to the `Session` constructor, it will always be used to generate a new access token.  Even if
-    a valid `access_token` is given to the `Session` constructor at the same time.  This means a value for `email` must
-    also be given (or implied from config).
-2.  If `password` is not given to the `Session` constructor, the value used for `access_token` is used.  Or, if not
-    given, implied from config.
-3.  If neither `password` nor `access_token` are given to the `Session` constructor, but both `password` and
-    `access_token` are defined in config, the `access_token` from config will be used.
+> Note: In the case of waking up a car, the command line `python -m carson --command wake_up` is effectively the same as
+as the short hand `python -m carson --wake-up` command.
 
 ## Streaming
 
@@ -163,10 +96,10 @@ Tesla provides a `websocket` endpoint from which telemetry data can be streamed 
 telemetry, issue the following command.
 
 ```console
-> python -m carson -v --display-name YOUR_CAR_NAME --stream
+> python -m carson -v --name YOUR_CAR_NAME --stream
 ```
 
-`carson` will attempt to _wake-up_ the car and initiate the streaming telemetry.  By default, the telemetry simply
+`carson` will attempt to *wake-up* the car and initiate the streaming telemetry.  By default, the telemetry simply
 outputs the data to log.  A sample of that output is below.
 
 ```console
@@ -187,16 +120,13 @@ outputs the data to log.  A sample of that output is below.
 ## Pythonic Features
 
 Python is a fantastic language.  One of my favorite features is its ability to customize attribute access.  That ability
-allows a _Vehicle_ class instance to basically act like a chameleon.  As Tesla changes its data structure and command
+allows a *Vehicle* class instance to basically act like a chameleon.  As Tesla changes its data structure and command
 interface for its cars, it's pretty easy for a Python class to essentially keep itself up to date.
-
-This section would normally be placed after the [States And Commands](#states-and-commands) section.  But I wanted to
-put this above the fold to call out the Pythonic features of `carson` - both in programmability and general use on the
-command line.
 
 ### Recursive Dot-Notation
 
 Consider this JSON response from Tesla when getting making a call to `vehicle_data`:
+
 ```json
 {
   "response": {

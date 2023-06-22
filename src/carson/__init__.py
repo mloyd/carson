@@ -2,8 +2,6 @@
 An asyncio package to interact with the Tesla JSON web service.
 """
 
-# flake8: noqa
-
 # __name__ = 'carson'
 # __package__ = __name__
 
@@ -11,14 +9,15 @@ from importlib.metadata import distribution, PackageNotFoundError
 
 __version__ = '0.0.0'
 __license__ = 'MIT'
+__license_files__ = ['LICENSE']
 __url__ = 'https://github.com/mloyd/carson'
 __author__ = 'Michael Loyd'
 __author_email__ = 'michael@loyd.org'
-__copyright__ = "Copyright 2021 %s" % __author__
+__copyright__ = f'Copyright 2021 {__author__}'
 
 try:
     _dist = distribution(__package__)         # Could raise PackageNotFoundError
-    _summary = _dist.metadata['Summary']      # Could return None if not build with a summary
+    _summary = _dist.metadata['Summary']      # Defined by pyproject.toml's description keyword.
     _version = _summary.split(' ', 1)[0]      # 'Version=1.2.3+b8-1a146aa  Description=An asynci...'
     __version__ = _version.split('=', 1)[-1]  # 'Version=1.2.3+b8-1a146aa
 except (PackageNotFoundError, AttributeError):
@@ -34,20 +33,8 @@ except ModuleNotFoundError:
     pass
 
 
-from .core import Session
-from .core import TeslaCredentialError
-from .core import VehicleStateError
-from .core import TeslaSessionError
-from . import auth
-from . import logging
-from . import stream
-
-
-__ALL__ = [
-    '__title__', '__version__', '__summary__', '__uri__', '__author__',
-    '__email__', '__license__', '__copyright__',
-    'Session', 'TeslaCredentialError', 'VehicleStateError', 'TeslaSessionError', 'auth', 'logging', 'stream'
-]
+from .core import Session  # noqa
+__all__ = ['__version__', 'Session']
 
 
 # OPTION_CODES are defined here for posterity only.  They are:

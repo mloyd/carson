@@ -3,16 +3,18 @@ The basic classes representing a connection with the Tesla web service and the
 cars on your account.
 """
 
+import os
 import asyncio
 import configparser
 import json
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from json import loads
 from pprint import pformat
 
 import aiohttp
 
-from . import config, logging, auth, utils, endpoints
+from . import endpoints
 from . import __version__ as _version
 
 LEGACY_ATTRIBUTES = """
@@ -58,62 +60,16 @@ class TeslaSessionError(Exception):
         super().__init__(*args, **kwargs)
 
 
-class TeslaCredentialError(TeslaSessionError):
-    """
-    Raised when anything other than status 200 is returned from a login attempt
-    """
-    pass
-
-
 class Session:
     """
-    Creates a session context to Tesla given the provided credentials or
-    inferring from config.
-
-    email:
-      The email/user associated with the tesla.com account.
-
-    password:
-      The password associated with the email/user account.
-
-    access_token:
-      Can be used in lieu of email/password if already generated.
-
-    If `password` is given, access_token is ignored.  Likewise, if `password` is
-    given, any token stored in config will be ignored.
+    Creates an HTTP client session context to Tesla given the provided access_token
     """
 
-    def __init__(self, email=None, password=None, access_token=None, verbose=0):
-        self.email = email or config.get('email')
-        self.password = password
+    def __init__(self, access_token: str = None, refresh_token: str = None, logger=None, verbose=0):
         self.verbose = 1 if verbose is True else verbose
 
-        self.logger = logging
+        self._logger = logger
         # If you want to set your own logger
-
-        self.auth = {
-            'access_token': access_token or config.get('access_token'),
-            # Authorization token used to make requests.  Translates to HTTP
-            # header value in the form:
-            #     Authorization: Bearer <token>
-
-            'created_at': config.getint('created_at', 0),
-            # The Unix timestamp value (UTC) returned when generating an auth
-            # token.  Number of seconds since 1970.
-
-            'expires_in': config.getint('expires_in', 0),
-            # The number of seconds returned from auth_timestamp the token will
-            # expire.  Sometimes it's big like 45 days.
-
-            'refresh_token': config.get('refresh_token'),
-        }
-
-        if password:
-            self.auth['access_token'] = None
-            self.auth['created_at'] = 0
-            self.auth['expires_in'] = 0
-        elif not self.auth['access_token']:
-            self.password = config.get('password')
 
         self._vehicles = {}
         # Our cached vehicles which maps name to instance of vehicle.
@@ -126,26 +82,48 @@ class Session:
 
         self.timer = time.monotonic
 
-    @property
-    def expires(self):
-        dt = datetime(1970, 1, 1)
-        created_at = self.auth.get('created_at', 0)
-        expires_in = self.auth.get('expires_in', 0)
-        if not created_at or not expires_in:
-            return None
-        return dt + timedelta(seconds=created_at + expires_in)
+        self._access_token = access_token or os.environ.get('CARSON_ACCESS_TOKEN', None)
+        self._refresh_token = refresh_token or os.environ.get('CARSON_REFRESH_TOKEN', None)
+        self._created_at = 0
+        self._expires_in = 0
 
     @property
-    def expired(self):
+    def logger(self):
+        if not self._logger:
+            from .logging import logger
+            self._logger = logger
+        return self._logger
+
+    @property
+    def expires(self) -> datetime:
+        if not self.created_at or not self.expires_in:
+            return None
+        return (
+            datetime(1970, 1, 1, tzinfo=timezone.utc)
+            + timedelta(seconds=self.created_at + self.expires_in)
+        )
+
+    @property
+    def access_token(self) -> str:
+        return self._access_token
+
+    @property
+    def refresh_token(self) -> str:
+        return self._refresh_token
+
+    @property
+    def created_at(self) -> int:
+        return self._created_at
+
+    @property
+    def expires_in(self) -> int:
+        return self._expires_in
+
+    @property
+    def expired(self) -> bool:
         # Careful, this is not a truthy. Can return None if unknown.
         exp = self.expires
-        if exp is None:
-            return None
-        return self.expires < datetime.utcnow()
-
-    @property
-    def access_token(self):
-        return self.auth.get('access_token', None)
+        return exp is None or exp < datetime.now(tz=timezone.utc)
 
     def __str__(self):
         buf = f'<Session email={self.email!r}'
@@ -157,26 +135,24 @@ class Session:
         if self._vehicles or self._request_count:
             buf += f' vehicles={len(self.vehicles):,}'
 
-        if self.auth.get('access_token', None):
-            # If we have an auth token, show that it is expired or when it will
-            # expire.
+        if self.access_token:
+            # If we have an auth token, show that it is expired or when it will.
             exp = self.expired
             if exp:
                 buf += ' expired'
             else:
-                exps = 'Unknown' if exp is None else str(self.expires - datetime.utcnow())
+                exps = 'Unknown' if exp is None else str(self.expires - datetime.now(tz=timezone.utc))
                 buf += f' expires={exps}'
 
         return buf + '>'
 
-    def _create_session(self, access_token=None):
+    async def _create_session(self):
+        await self.close()
         default_headers = {'User-Agent': f'carson/{_version}'}
-        if access_token:
-            default_headers['Authorization'] = f'Bearer {access_token}'
-            if self.verbose > 2:
-                self.logger.debug('Creating client session with access token')
+        if self.access_token:
+            default_headers['Authorization'] = f'Bearer {self.access_token}'
         elif self.verbose > 2:
-            self.logger.debug('Creating client session WITHOUT access token')
+            self.logger.warning('Creating client session WITHOUT access token')
         return aiohttp.ClientSession(headers=default_headers)
 
     def __enter__(self):
@@ -188,10 +164,13 @@ class Session:
         assert not self._session or self._session.closed
 
     async def __aenter__(self):
+        if self.verbose > 2:
+            self.logger.debug('Session.__aenter__()')
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
-        self.logger.debug('Session.__aexit__(exc_type=%r  exc_value=%r  traceback=%r', exc_type, exc_value, traceback)
+        if self.verbose > 2 or self.verbose and any([exc_type, exc_value, traceback]):
+            self.logger.debug('Session.__aexit__(exc_type=%r  exc_value=%r  traceback=%r', exc_type, exc_value, traceback)
         await self.close()
 
     async def close(self):
@@ -199,34 +178,6 @@ class Session:
             if not self._session.closed:
                 await self._session.close()
             self._session = None
-
-    async def login(self):
-
-        self.auth = {'access_token': None, 'refresh_token': None, 'created_at': 0, 'expires_in': 0}
-        config.setitems(self.auth)
-
-        # We want to explicitly close any current session to make sure we
-        # expunge the bearer token.  This makes sure it matches what we just
-        # wrote to config which is access_token=None.
-        await self.close()
-
-        missing = [attr for attr in ('email', 'password') if not getattr(self, attr)]
-        if missing:
-            missing = ', '.join(missing)
-            raise TeslaCredentialError(f'Cannot login.  Missing attributes: {missing}.')
-
-        try:
-            new_auth = await auth.get_auth_data(self.email, self.password)
-        except Exception:
-            self.logger.error('Could not authenticate.', exc_info=True)
-            raise TeslaCredentialError()
-
-        newdata = {k: new_auth.get(k) for k in self.auth if k in new_auth}
-        self.auth.update(newdata)
-        config.set('email', self.email)
-        config.setitems(self.auth)
-        config.save()
-        self._session = self._create_session(access_token=self.auth.get('access_token'))
 
     async def vehicles(self, *, name=None, cache=True):
         """
@@ -288,39 +239,28 @@ class Session:
 
     async def ws_connect(self, *args, **kwargs):
         if not self._session or self._session.closed:
-            # If we don't have a session, create an instance using an access
-            # token if we have one.
             self._session = self._create_session(access_token=self.auth.get('access_token'))
-
-        if 'Authorization' not in self._session._default_headers:
-            # If creating a session using an access token did not result in us
-            # having an auth header, try to login.  Will raise
-            # TeslaCredentialError if it fails.
-            await self.login()
 
         return await self._session.ws_connect(*args, **kwargs)
 
     async def request(self, method, path, data=None, attempts=1):
 
+        if method not in ('GET', 'POST'):
+            raise ValueError(f'"{method}" is not a supported method.  Only "GET" and "POST" are supported.')
+
+        if method == 'POST' and data is None:
+            data = {}
+
         if not self._session or self._session.closed:
             # If we don't have a session, create an instance using an access
             # token if we have one.
-            self._session = self._create_session(access_token=self.auth.get('access_token'))
-
-        if 'Authorization' not in self._session._default_headers:
-            # If creating a session using an access token did not result in us
-            # having an auth header, try to login.  Will raise
-            # TeslaCredentialError if it fails.
-            await self.login()
-
-        if method not in ('GET', 'POST'):
-            raise ValueError(f'"{method}" is not a supported method.  Only "GET" and "POST" are supported.')
+            self._session = await self._create_session()
 
         url = f'{BASEURL}{path}'
 
         jdata = {
             'carsonRequest': {'url': url, 'method': method},
-            'carsonTimestamp': datetime.utcnow().isoformat(),
+            'carsonTimestamp': datetime.now(tz=timezone.utc).isoformat(),
 
             'status': 0,
             # The HTTP status code returned by `requests` package
@@ -364,7 +304,7 @@ class Session:
                 if self.verbose >= 2:
                     self.logger.debug(logmsg)
 
-            resp = await self._session.request(method, url, data=data)
+            resp = await self._session.request(method, url, json=data)
             jdata['status'] = resp.status
 
             real_url = str(resp.real_url)
@@ -395,7 +335,7 @@ class Session:
 
             if txt and 'json' in content_type.lower():
                 try:
-                    jdata.update(utils.json_loads(txt))
+                    jdata.update(loads(txt))
                 except json.decoder.JSONDecodeError:
                     jdata['error'] = 'json.decoder.JSONDecodeError'
                     jdata['error_description'] = f'resp.text={resp.text!r}'
@@ -405,7 +345,11 @@ class Session:
                 # Then we have no idea what's going on.
                 jdata['error'] = txt
 
-            # We will re-try a 408 and anything in the 500s.
+            # We will re-try a 408 and anything in the 500s.  But not 406
+            assert resp.status != 406
+            if resp.status == 406:
+                raise TeslaSessionError('Error code 406')
+
             if resp.status == 408 or resp.status >= 500:
                 if attempts > 1:
                     logmsg = 'Received status code {} on attempt {:,} of {:,}.'
@@ -519,6 +463,10 @@ class Vehicle:
             self._init_from(details)
 
     def __getattribute__(self, attr):
+
+        attr = 'display_name' if attr == 'name' else attr
+        # The `name`` attribute is an implicit alias for `display_name`.`
+
         try:
             return object.__getattribute__(self, attr)
         except AttributeError:
@@ -650,11 +598,16 @@ class Vehicle:
 
     @property
     def logger(self):
-        return self._session and self._session.logger or logging.logger
+        if self._session:
+            return self._session.logger
+        from .logging import logger
+        return logger
 
     @property
     def token(self):
         """
+        Careful!  A `token` is not the same thing as an access token.
+
         Usually `self.tokens` is a list of two tokens.  Either of them will do (I think).  But
         instead of checking their existance and then picking the first one every time we need
         one in various places in the code, let a property do the dirty work for you.
@@ -666,7 +619,7 @@ class Vehicle:
         """
         Not to be confused with self.token
         """
-        return self._session.auth.get('access_token') if self._session else None
+        return self._session.access_token if self._session else None
 
     @property
     def email(self):
