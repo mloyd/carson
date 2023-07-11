@@ -32,9 +32,12 @@ try:
 except ModuleNotFoundError:
     pass
 
+OWNER_BASE_URL = 'https://owner-api.teslamotors.com'
 
-from .core import Session  # noqa
-__all__ = ['__version__', 'Session']
+from .core import Session            # noqa:E402
+from .core import TeslaSessionError  # noqa:E402
+from .core import VehicleStateError  # noqa:E402
+__all__ = ['__version__', 'Session', 'TeslaSessionError', 'VehicleStateError']
 
 
 # OPTION_CODES are defined here for posterity only.  They are:

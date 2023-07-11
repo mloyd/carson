@@ -1,15 +1,18 @@
 import sys
+import os
 import argparse
 import asyncio
 import warnings
 
 from carson import Session, logging
+from carson.tokens import TOKEN_ATTRS
 
 
 def main(*args):
     if not args:
         args = sys.argv
-        if args and args[0].endswith('__main__.py'):
+        _arg = args[0] if args else ''
+        if _arg.endswith('__main__.py') or _arg.endswith('carson'):
             args = args[1:]
 
     from carson import __version__
@@ -17,6 +20,7 @@ def main(*args):
     parser = argparse.ArgumentParser('carson', description=f'Command line utility for {version}')
     creds = parser.add_argument_group('Credentials')
     creds.add_argument('--token', dest='access_token', metavar='TOKEN', help='Access token to authenticate to Tesla.')
+    creds.add_argument('--refresh', dest='refresh_token', metavar='TOKEN', help='Refresh token for when access token expires.')
 
     actions = parser.add_argument_group('Queries/Actions')
     actions.add_argument('--list', '-l', default=False, action='store_true', help='List vehicles associated with the account and exit.')
@@ -50,7 +54,25 @@ def main(*args):
 
 async def start(args):
 
-    async with Session(access_token=args.access_token, verbose=args.verbose) as session:
+    kwargs = {
+        'credential': {
+            # Reads token attributes config in order of precedence:
+            #  1) Command line argument
+            #  2) Environment variable
+            key: val
+            for key in TOKEN_ATTRS
+            if (
+                val := (
+                    getattr(args, key, None)
+                    or os.environ.get(f'CARSON_{key.upper()}', None)
+                )
+            )
+        },
+        'verbose': args.verbose,
+        'callback': _notify_token_refreshed,
+    }
+
+    async with Session(**kwargs) as session:
         if not session.access_token:
             raise SystemExit('You must provide access token or set environment variable CARSON_ACCESS_TOKEN.')
         result = await (
@@ -96,6 +118,35 @@ async def start(args):
                 logging.info('Result of `%s()` is %s', cmd, func())
             else:
                 logging.info('Result of %r is %s', cmd, func)
+
+
+def _notify_token_refreshed(updates: dict):
+    if not isinstance(updates, dict):
+        raise TypeError(f'Expected dict, got {type(updates).__name__}')
+    invalid_keys = [
+        repr(f'{str(key)[:2]}***')
+        for key in updates
+        if not isinstance(key, str)
+        or key not in TOKEN_ATTRS
+    ]
+    if invalid_keys:
+        raise TypeError(f'Expected mapping of string keys only.  Got unknown keys {", ".join(invalid_keys)}.')
+    invalid_vals = [
+        f'{key}={type(val).__name__}'
+        for key, val in updates.items()
+        if not isinstance(val, (str, int))
+    ]
+    if invalid_vals:
+        raise TypeError(f'Expected mapping of str --> str|int. {", ".join(invalid_vals)}')
+
+    logging.warning('Token refreshed but not stored/logged for security reasons.')
+    if logging.is_debug_enabled():
+        loggable = [
+            f'  {key}: val=<hidden> type={type(val).__name__} len={len(str(val)):,}'
+            for key, val in updates.items()
+        ]
+        for ln in loggable:
+            logging.warning(ln)
 
 
 if __name__ == '__main__':

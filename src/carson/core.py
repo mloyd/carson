@@ -2,18 +2,19 @@
 The basic classes representing a connection with the Tesla web service and the
 cars on your account.
 """
-
+from typing import Any
 import os
 import asyncio
 import configparser
-import json
 import time
+import warnings
 from datetime import datetime, timedelta, timezone
-from json import loads
 from pprint import pformat
 
-import aiohttp
+from aiohttp import ClientSession
 
+from . import OWNER_BASE_URL
+from . import tokens
 from . import endpoints
 from . import __version__ as _version
 
@@ -40,8 +41,7 @@ LEGACY_ATTRIBUTES = """
 _legacy_parser = configparser.ConfigParser(allow_no_value=True)
 _legacy_parser.read_string(LEGACY_ATTRIBUTES)
 LEGACY_ATTRIBUTES = tuple(_legacy_parser.options('legacy'))
-
-BASEURL = 'https://owner-api.teslamotors.com'
+REQUEST_TIMEOUT = 408  # https://httpwg.org/specs/rfc9110.html#status.408
 
 
 class TeslaSessionError(Exception):
@@ -49,15 +49,26 @@ class TeslaSessionError(Exception):
     Represents a generic exception raised when the expected response from the Tesla web service
     request is not as expected.
     """
-    def __init__(self, *args, **kwargs):
+    def __init__(self, jdata=None, /, **kwargs):
 
-        self.response = kwargs.pop('response', None)
+        assert bool(jdata) ^ bool(kwargs), f'Should not be both args and kwargs. args={jdata} kwargs={kwargs}'
+
+        if jdata:
+            kwargs = jdata
+
+        self.timestamp = kwargs.get('carsonTimestamp', None)
+
+        self.response = kwargs.get('response', None)
         # The JSON response returned from the Tesla endpoint.
 
-        self.status = self.response.get('status') if self.response else None
+        self.status = kwargs.get('status', 0)
         # The HTTP response status code
 
-        super().__init__(*args, **kwargs)
+        # The error/desc reported back by Tesla
+        self.error = kwargs.get('error', None) or f'Status {self.status}'
+        self.error_description = kwargs.get('error_description', None) or 'N/A'
+
+        super().__init__(self.error)
 
 
 class Session:
@@ -65,27 +76,57 @@ class Session:
     Creates an HTTP client session context to Tesla given the provided access_token
     """
 
-    def __init__(self, access_token: str = None, refresh_token: str = None, logger=None, verbose=0):
-        self.verbose = 1 if verbose is True else verbose
+    def __init__(self, *, credential=None, logger=None, verbose=0, **kwargs):
+        """
+        credential:
+            Anything that accepts __getitem__ for the usual items (a.k.a. a dict object):
+              - access_token: str
+              - refresh_token: str
+              - expires_in: int
+              - created_at: int
 
-        self._logger = logger
-        # If you want to set your own logger
+        NOTE: it is an error to pass both a credential and kwargs for the same items.
+        """
+        deprecated = {
+            attr: kwargs.pop(attr)
+            for attr in kwargs
+            if attr in 'email password'.split()
+        }
+        if deprecated:
+            warnings.warn('carson.Session no longer uses email/password.  Please remove.')
 
-        self._vehicles = {}
-        # Our cached vehicles which maps name to instance of vehicle.
+        if credential is None:
+            credential = {
+                attr: (
+                    kwargs.pop(attr, None)
+                    or os.environ.get(f'CARSON_{attr.upper()}', None)
+                )
+                for attr in tokens.TOKEN_ATTRS
+            }
+        else:
+            doubled = [el for el in tokens.TOKEN_ATTRS if el in kwargs]
+            if doubled:
+                raise ValueError(f'Cannot pass both a credential object and {", ".join(doubled)}')
 
-        self._request_count = 0
-        # How many outbound reqeusts have been made.
+        self._credential = tokens.Credential(credential)
 
-        self._session = None
-        # Will not create an aoihttp session until the first request.
+        if (callback := kwargs.pop('callback', None)):
+            self._credential.add_refresh_callback(callback)
 
+        # We should have consumed everything in kwargs by this point.
+        if kwargs:
+            raise TypeError(f'Unexpected keyword argument: {", ".join(kwargs)}')
+
+        verbose = 1 if verbose is True else verbose
+        self.verbose = verbose if isinstance(verbose, int) else 1
+        self._logger = logger    # If you want to set your own logger
+        self._vehicles = {}      # Our cached vehicles which maps name to instance of vehicle.
+        self._request_count = 0  # How many outbound reqeusts have been made.
         self.timer = time.monotonic
 
-        self._access_token = access_token or os.environ.get('CARSON_ACCESS_TOKEN', None)
-        self._refresh_token = refresh_token or os.environ.get('CARSON_REFRESH_TOKEN', None)
-        self._created_at = 0
-        self._expires_in = 0
+        headers = {'User-Agent': f'carson/{_version}', 'Accept': 'application/json'}
+        self._session = ClientSession(headers=headers)
+        self.access_token = self._credential.access_token
 
     @property
     def logger(self):
@@ -95,65 +136,81 @@ class Session:
         return self._logger
 
     @property
-    def expires(self) -> datetime:
-        if not self.created_at or not self.expires_in:
-            return None
-        return (
-            datetime(1970, 1, 1, tzinfo=timezone.utc)
-            + timedelta(seconds=self.created_at + self.expires_in)
-        )
+    def access_token(self):
+        return self._credential.access_token
+
+    @access_token.setter
+    def access_token(self, val: str):
+        val = '' if val is None else val
+        val = val.strip() if isinstance(val, str) else val
+        self._credential.access_token = val
+        if not val:
+            self._session.headers.pop('Authorization', None)
+            auth_header = self._session.headers.get('Authorization', None)
+            assert auth_header is None, f'session.headers["Authorization"]=={auth_header!r}'
+        else:
+            self._session.headers['Authorization'] = f'Bearer {val}'
 
     @property
-    def access_token(self) -> str:
-        return self._access_token
-
-    @property
-    def refresh_token(self) -> str:
-        return self._refresh_token
-
-    @property
-    def created_at(self) -> int:
-        return self._created_at
-
-    @property
-    def expires_in(self) -> int:
-        return self._expires_in
+    def expires_at(self) -> datetime:
+        created_at = self._credential.created_at
+        expires_in = self._credential.expires_in
+        if isinstance(created_at, int) and isinstance(expires_in, int):
+            return (
+                datetime.fromtimestamp(created_at, tz=timezone.utc)
+                + timedelta(seconds=expires_in)
+            )
 
     @property
     def expired(self) -> bool:
-        # Careful, this is not a truthy. Can return None if unknown.
-        exp = self.expires
-        return exp is None or exp < datetime.now(tz=timezone.utc)
+        expires_at = self.expires_at
+        return (
+            not isinstance(expires_at, datetime)
+            or datetime.now(tz=timezone.utc) > expires_at
+        )
+
+    async def user(self) -> dict:
+        user = getattr(self, '_user', None)
+        if user is None:
+            jdata = await self.request(method='GET', path='/api/1/users/me')
+            self._user = jdata['response']
+        return self._user
 
     def __str__(self):
-        buf = f'<Session email={self.email!r}'
+        # buf = f'<Session email={self.email!r}'
+        buf = '<Session'
 
         # If `self._vehicles` is empty, it doesn't mean we don't have any.  So
         # don't report zero.  But we shouldn't make a request simply to get the
         # number of vehichles either.  Unless this would not be the first
         # request.
         if self._vehicles or self._request_count:
-            buf += f' vehicles={len(self.vehicles):,}'
+            buf += f' vehicles={len(self._vehicles):,}'
 
         if self.access_token:
-            # If we have an auth token, show that it is expired or when it will.
-            exp = self.expired
-            if exp:
-                buf += ' expired'
+            # If we have an access token, show that it is expired or when it will.
+            expired = self.expired
+            if expired or expired is None:
+                buf += ' EXPIRED'
             else:
-                exps = 'Unknown' if exp is None else str(self.expires - datetime.now(tz=timezone.utc))
-                buf += f' expires={exps}'
+                buf += f' expires={self.expires_at - datetime.now(tz=timezone.utc)}'
 
         return buf + '>'
 
-    async def _create_session(self):
-        await self.close()
-        default_headers = {'User-Agent': f'carson/{_version}'}
-        if self.access_token:
-            default_headers['Authorization'] = f'Bearer {self.access_token}'
-        elif self.verbose > 2:
-            self.logger.warning('Creating client session WITHOUT access token')
-        return aiohttp.ClientSession(headers=default_headers)
+    def __getattribute__(self, name: str):
+        if name in tokens.TOKEN_ATTRS:
+            _cred = super().__getattribute__('_credential')
+            return getattr(_cred, name)
+        return super().__getattribute__(name)
+
+    def __setattr__(self, name: str, val: Any):
+        # Even if it's a known token attribute, if we have a data descriptor for it, set
+        # ourselves first.  It's assumed our own data descriptors will set the _credential too.
+        if name in tokens.TOKEN_ATTRS and not hasattr(self, name):
+            _cred = super().__getattribute__('_credential')
+            setattr(_cred, name, val)
+        else:
+            super().__setattr__(name, val)
 
     def __enter__(self):
         return self
@@ -165,19 +222,25 @@ class Session:
 
     async def __aenter__(self):
         if self.verbose > 2:
-            self.logger.debug('Session.__aenter__()')
+            self.logger.debug('Session.__aenter__() self._session=%s', self._session)
         return self
 
     async def __aexit__(self, exc_type, exc_value, traceback):
         if self.verbose > 2 or self.verbose and any([exc_type, exc_value, traceback]):
-            self.logger.debug('Session.__aexit__(exc_type=%r  exc_value=%r  traceback=%r', exc_type, exc_value, traceback)
+            self.logger.debug('Session.__aexit__(exc_type=%r  exc_value=%r  traceback=%r)', exc_type, exc_value, traceback)
         await self.close()
 
+    def add_refresh_callback(self, callback):
+        """
+        If an access token is expired and is refreshed, call the 'callback' function when the
+        access token is refreshed so it can be handled/saved accordingly.
+        """
+        return self._credential.add_refresh_callback(callback)
+
     async def close(self):
-        if self._session:
-            if not self._session.closed:
-                await self._session.close()
-            self._session = None
+        if self._session and not self._session.closed:
+            await self._session.close()
+        self._session = None
 
     async def vehicles(self, *, name=None, cache=True):
         """
@@ -238,12 +301,49 @@ class Session:
     car = vehicle
 
     async def ws_connect(self, *args, **kwargs):
-        if not self._session or self._session.closed:
-            self._session = self._create_session(access_token=self.auth.get('access_token'))
-
         return await self._session.ws_connect(*args, **kwargs)
 
-    async def request(self, method, path, data=None, attempts=1):
+    def _request_debug(self, response, response_payload, request_payload, started, stopped):
+        if not self.verbose:
+            return
+        request = response.request_info
+        if self.verbose == 1:
+            ver = f'{response.version.major}.{response.version.minor}'
+            ver = '2' if ver == '2.0' else ver
+            msg = (
+                f'Req {self._request_count:,} {request.method} {request.url.path} '
+                f'HTTP/{ver} {response.status} {response.reason}'
+            )
+            self.logger.debug(msg)
+            return
+
+        duration = timedelta(seconds=stopped - started)
+        self.logger.debug(f'Req {self._request_count:,} status={response.status} dur={duration}')
+        self.logger.debug(f'{request.method} {request.url}')
+        for key, val in request.headers.items():
+            if key == 'Authorization':
+                if val.startswith('Bearer ') and (tmp := val[len('Bearer '):]):
+                    tmp = '*****' if len(tmp) <= 5 else f'{tmp[0]}***{tmp[-2:]}'
+                    val = f'Bearer {tmp}'
+            self.logger.debug(f'< {key}: {val}')
+        self.logger.debug('')
+        if request_payload:
+            self.logger.debug(f'request={_masked_debug(request_payload)}')
+            self.logger.debug('')
+
+        self.logger.debug(f'HTTP {response.status} {response.reason} {response.version}')
+        for key, val in response.headers.items():
+            self.logger.debug(f'> {key}: {val}')
+        self.logger.debug('')
+        if response_payload:
+            self.logger.debug(f'response={_masked_debug(response_payload)}')
+            self.logger.debug('')
+
+    async def request(self, method, path, data=None, attempts: int = 3) -> dict:
+
+        if not isinstance(attempts, int) or attempts < 1:
+            raise ValueError(f'attempts must be a positive integer.  not {attempts!r}')
+        attempts = min(attempts, 20)  # default func signature, no more than 20
 
         if method not in ('GET', 'POST'):
             raise ValueError(f'"{method}" is not a supported method.  Only "GET" and "POST" are supported.')
@@ -251,135 +351,85 @@ class Session:
         if method == 'POST' and data is None:
             data = {}
 
-        if not self._session or self._session.closed:
-            # If we don't have a session, create an instance using an access
-            # token if we have one.
-            self._session = await self._create_session()
-
-        url = f'{BASEURL}{path}'
-
-        jdata = {
-            'carsonRequest': {'url': url, 'method': method},
-            'carsonTimestamp': datetime.now(tz=timezone.utc).isoformat(),
-
-            'status': 0,
-            # The HTTP status code returned by `requests` package
-
-            'response': {},
-            # This is populated by Tesla unless there is an error
-
-            'error': None,
-            # Non network/protocol errors reported by Tesla.
-            # Example: "https://mothership.prd.sjc.vnet:5678/vehicles/0123456789 => operation_timedout with 10s timeout for txid `99xxxxxxxxxxxxxxxxxxxxxxxxxxxx47`",
-
-            "error_description": '',
-            # Provided by Tesla when 'error' is present.  But I have never seen
-            # anything other than an empty string.
-        }
+        url = f'{OWNER_BASE_URL}{path}'
+        error = None
 
         # Sometimes we get routine upstream errors from the mothership.  As a convenience, the
         # `attempts` param can be increased when HTTP status code >= 500 or 408 timeout is
         # encountered.
-        # TODO: Make configurable by HTTP status code?
-        if not isinstance(attempts, int) or attempts < 1:
-            attempts = 1
-        attempts = min(attempts, 20)
-        logmsg = ''
         for attempt in range(1, attempts + 1):
-            self._request_count += 1
+            status, reason, payload = await self._request(method, url, data)
+            if status == 401 and payload.get('error', '') == 'invalid bearer token':
+                await self._credential.do_refresh_token()
+                self.access_token = self._credential.access_token
+                status, reason, payload = await self._request(method, url, data)
+                status = 401 if status != 200 else status
 
-            rstart = 0
-            rstop = 0
-            if self.verbose:
-                rstart = self.timer()
-                rstop = rstart
-                logmsg = f'Req# {self._request_count:,}'
-                if attempt > 1:
-                    logmsg += f' (attempt #{attempt:,} of {attempts:,})'
-                logmsg += f':  Method={method} url={url!r}'
-                if data:
-                    logmsg += f' data={_masked_debug(data)!r}'
-                if self.verbose > 2:
-                    self.logger.debug('=' * 110)
-                if self.verbose >= 2:
-                    self.logger.debug(logmsg)
+            jdata = {
+                'carsonRequest': {'url': url, 'method': method},
+                'carsonTimestamp': datetime.now(tz=timezone.utc).isoformat(),
 
-            resp = await self._session.request(method, url, json=data)
-            jdata['status'] = resp.status
+                'status': status,
+                # The HTTP status code returned by `requests` package
 
-            real_url = str(resp.real_url)
-            if real_url != url:
-                # e.g. redirect
-                jdata['carsonRequest'] = {
-                    'endpoint': url,
-                    'method': method,
-                    'url': real_url
-                }
+                'response': payload.get('response', None) or {},
+                # This is populated by Tesla unless there is an error
 
-            if self.verbose:
-                rstop = self.timer()
-                if self.verbose == 1:
-                    logmsg += f' status={resp.status!r} duration={timedelta(seconds=rstop - rstart)}'
-                    self.logger.debug(logmsg)
-                else:
-                    self.logger.debug(f'Req# {self._request_count}:  Response received. status={resp.status!r} duration={timedelta(seconds=rstop - rstart)}')
-                if self.verbose > 2:
-                    for i, (key, val) in enumerate(resp.headers.items()):
-                        self.logger.debug(f'Header {i:,}: {key: <30}  {val}')
-                    self.logger.debug('=' * 110)
+                'error': payload.get('error', reason if status != 200 else None),
+                # Non network/protocol errors reported by Tesla.
+                # Example: "https://mothership.prd.sjc.vnet:5678/vehicles/0123456789 => operation_timedout with 10s timeout for txid `99xxxxxxxxxxxxxxxxxxxxxxxxxxxx47`",
+            }
 
-            txt = await resp.text()
-            content_type = resp.headers.get('Content-Type', 'unknown')
-            if self.verbose > 1:
-                self.logger.debug(f'content_type={content_type!r} txt={txt!r}')
+            # If 408 Request Timeout or anything >= 500, retry
+            if status != REQUEST_TIMEOUT or status < 500:
+                if status >= 400:
+                    raise TeslaSessionError(jdata)
+                return jdata
 
-            if txt and 'json' in content_type.lower():
-                try:
-                    jdata.update(loads(txt))
-                except json.decoder.JSONDecodeError:
-                    jdata['error'] = 'json.decoder.JSONDecodeError'
-                    jdata['error_description'] = f'resp.text={resp.text!r}'
-                    self.logger.error('Response indicated a JSON response.  But parsing produced an error.')
-                    self.logger.error('resp.text=%r\ndata=%r', resp.text, jdata, exc_info=True)
-            else:
-                # Then we have no idea what's going on.
-                jdata['error'] = txt
+            if attempt < attempts:
+                sleep = 1.00784 * 3.141592653589793 * (attempt + 1)
+                # Hydrogen x PI.  See the movie Contact
 
-            # We will re-try a 408 and anything in the 500s.  But not 406
-            assert resp.status != 406
-            if resp.status == 406:
-                raise TeslaSessionError('Error code 406')
+                self.logger.warning(
+                    'Received HTTP=%d on attempt %d of %d.  Waiting %s before trying again.',
+                    status,
+                    attempt,
+                    attempts,
+                    timedelta(seconds=sleep).total_seconds()
+                )
+                await asyncio.sleep(sleep)
 
-            if resp.status == 408 or resp.status >= 500:
-                if attempts > 1:
-                    logmsg = 'Received status code {} on attempt {:,} of {:,}.'
-                    logargs = [resp.status, attempt, attempts]
-                else:
-                    logmsg = 'Received status code {}.'
-                    logargs = [resp.status]
-
-                if attempt < attempts:
-                    logmsg += ' Sleeping {:.2f} before retry.  Content-Type={!r} txt={!r}'
-
-                    sleep = 1.00784 * 3.141592653589793 * (attempt + 1)
-                    # Hydrogen x PI.  See the movie Contact
-
-                    logargs.extend([sleep, content_type, txt])
-                    self.logger.warning(logmsg.format(*logargs))
-                    await asyncio.sleep(sleep)
-                else:
-                    raise TeslaSessionError(logmsg.format(*logargs), response=jdata)
-
-            else:
-                break
-
-        return jdata
+        raise TeslaSessionError(status=status, error=error)
 
     async def get(self, path, data=None):
         return await self.request('GET', path, data=data)
 
     async def post(self, path, data={}):
         return await self.request('POST', path, data=data)
+
+    async def _request(self, method, url, data):
+        started = self.timer()
+        self._request_count += 1
+        async with self._session.request(method, url, json=data) as response:
+            payload = (
+                # Some responses are not json (e.g. 503 Service Unavailable).  The
+                # easiest thing to do would simply coerce everything to json.
+                await response.json()
+                if 'json' in response.content_type
+                else await response.text()
+            )
+            ended = self.timer()
+            if isinstance(payload, str):
+                payload = {'text': payload}
+            assert isinstance(payload, dict), f'({type(payload)}) payload={payload!r}'
+
+            self._request_debug(response, payload, data, started, ended)
+
+            status = response.status
+            if status == 401 and 'WWW-Authenticate' in response.headers:
+                payload['error'] = response.headers['WWW-Authenticate']
+
+            return status, response.reason, payload
 
 
 class NestedData:
@@ -651,22 +701,19 @@ class Vehicle:
 
         # curl -i --oauth2-bearer 99***7c --data "" https://owner-api.teslamotors.com/api/1/vehicles/12345678901234567/wake_up
         previous_state = self.state
-        await self._session.request('POST', f'/api/1/vehicles/{self.id}/wake_up')
-
-        self.state = 'wakeup'
-
         attempts = 20
-        for attempt in range(1, attempts + 1):
-            self.logger.debug('Waiting for car to wake up. #%d of %d', attempt, attempts)
-            try:
-                jdata = await self._session.request('GET', f'/api/1/vehicles/{self.id}/vehicle_data')
-                self._init_from(jdata.get('response'))
-                return self.dump()
-            except TeslaSessionError as err:
-                if err.status != 408 or attempt == attempts:
-                    self.state = previous_state
-                    raise
-                await asyncio.sleep(1)
+        self.state = 'wakeup'
+        await self._session.post(f'/api/1/vehicles/{self.id}/wake_up')
+        self.logger.debug('Waiting for car to wake up. attempts=%d', attempts)
+        try:
+            path = f'/api/1/vehicles/{self.id}/vehicle_data'
+            jdata = await self._session.request('GET', path, attempts=attempts)
+        except TeslaSessionError:
+            self.state = previous_state
+            raise
+
+        self._init_from(jdata.get('response'))
+        return self.dump()
 
     async def data(self):
         """
@@ -688,12 +735,13 @@ class Vehicle:
             self._init_from(jdata.get('response'))
             return self.dump()
 
-        if status == 408:
+        if status == REQUEST_TIMEOUT:
             msg = 'Car is no longer online.'
-            if self.state == 'wakeup':
+            old_state = self.state
+            if old_state == 'wakeup':
                 msg = 'Could not wake up car.'
             self.state = 'unknown'
-            raise VehicleStateError(msg)
+            raise VehicleStateError(msg, state=old_state)
 
         self.logger.error('Could not get a good response for data.  resp=%r', jdata)
         raise TeslaSessionError('Could not get a good response.', response=jdata)
@@ -758,7 +806,7 @@ def _masked_debug(d):
     if d is None:
         return None
 
-    assert isinstance(d, str) or isinstance(d, dict), type(d)
+    assert isinstance(d, (str, dict)), type(d)
 
     if isinstance(d, str):
         if len(d) < 5:

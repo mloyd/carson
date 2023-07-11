@@ -9,13 +9,14 @@ aiohttp = "*"
 [dev-packages]
 carson = {editable = true, path = "."}
 setuptools-scm = {extras = ["toml"], version = ">=7.1"}
+flake8 = "*"
 rope = "*"
 yapf = "*"
-flake8 = "*"
 twine = "*"
-
-[scripts]
-build = "python -m pip wheel --no-deps --wheel-dir dist ."
 
 [requires]
 python_version = "3"
+
+[jwt]
+pyjwt = "*"
+cryptography = "*"

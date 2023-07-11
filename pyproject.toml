@@ -25,6 +25,9 @@ classifiers = [
 # If you want carson to refresh your tokens, you will need to include these.
 jwt = ["pyjwt", "cryptography"]
 
+[project.scripts]
+carson = "carson.__main__:main"
+
 [tool.setuptools_scm]
 version_scheme = "python-simplified-semver"
 local_scheme = "dirty-tag"
