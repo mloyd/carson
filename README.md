@@ -4,10 +4,11 @@
 [![Latest Version][pypi-image]][pypi-url]
 
 * [Overview](#overview)
+* [Installation](#installation)
 * [Authentication](#authentication)
-* [Configuration](#configuration)
 * [States And Commands](#states-and-commands)
-* [Streaming](#streaming)
+* [Examples](#examples)
+* [Streaming](#examples)
 
 ## Overview
 
@@ -26,20 +27,69 @@ documentation for [`asyncio`](https://docs.python.org/3/library/asyncio.html).
 
 There is one dependency for basic usage &mdash; [`aiohttp`](https://docs.aiohttp.org/).
 
+## Installation
+
+As with most python projects, you should create an isolated python environment.  The following
+example will use Python's `venv` module.  But you can use any virtual environment manager you wish
+(e.g. pipenv, poetry, virtualenv, conda).
+
+### Windows
+
+```
+python3.exe -m venv .venv
+.venv\Scripts\activate
+python -m pip install "carson[jwt]"
+carson --version
+carson/1.2.1+0d5c31d
+```
+
+### Linux/Mac
+
+```
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install "carson[jwt]"
+carson --version
+carson/1.2.1+0d5c31d
+```
+
+For command line usage, `carson` can be invoked either as a Python module `python -m carson` or as a
+script (simply named `carson`) which gets created during installation.  Both invoke the same entry
+point essentially making the following two statements the same.
+
+```
+python -m carson --version
+```
+
+is equivalent to
+
+```
+carson --version
+```
+
 ## Authentication
 
-This project is *BYOT* (bring your own token) only.  OAuth 2.0 and authentication flows are **not** goals of this
-project.   There are many apps and utilities that provide this if you need help creating access and/or refresh tokens to
-use Tesla's API.  Refer to the [configuration](#configuration) section for information on how to use this with `carson`.
+This project is *BYOT* (bring your own token) only.  OAuth and authentication flows are _**not**_
+goals of this project.   There are many apps and utilities that provide this if you need help
+creating access and/or refresh tokens to use Tesla's API.
 
-## Configuration
+At a minimum, an **access token** is required.  This can be set with the environment variable named
+`CARSON_ACCESS_TOKEN` or passed to the `carson.Session` constructor.  Values passed as arguments
+take priority over environment variables.
 
-Tokens can be configured via environment variables or passed as arguments to the constructor.  Token values passed as
-arguments take priority over environment variables.
+If you want `carson` to refresh expired access tokens, you will also need to supply a valid
+**refresh token** that matches the supplied **access token**.  Likewise, this can be set as an
+environment variable `CARSON_REFRESH_TOKEN` or passed to the `carson.Session` constructor.
+
+You can register a callable (e.g. function, lambda, callable object, etc.) to be invoked when tokens
+have refreshed.  This _callable_ should take one positional argument which will be a `dict` and
+contain the tokens that have updated.
+
+See [`docs/examples.md`](docs/examples.md) for more examples.
 
 ## States And Commands
 
-With its most basic usage, you can use `carson` to get the current state of car with the following code:
+With its most basic usage, you can use `carson` to get the current state of car with the following:
 
 ```python
 >>>import asyncio
@@ -53,69 +103,96 @@ With its most basic usage, you can use `carson` to get the current state of car 
 Dark Nebula is 'asleep'
 ```
 
-Or you can run it from the command line in a similar fashion:
+From the command line, you can invoke `carson --list` to get a list of vehicles associated with the
+access token you are using:
 
-```console
-> python -m carson --name "Dark Nebula"
+```
+$ carson --list
+Car #1 Vehicle('Dark Nebula' state='asleep' id=1234567890123456)
+Car #2 Vehicle('photon' state='online' id=1234567890123456)
 ```
 
 If you have more than one vehicle and want to specify which car to show, you can pass `--name` to disambiguate which car
-you want to show.  Otherwise, `carson` will return the most recent vehicle listed on your account.
+you want to show.
 
-```console
-> python -m carson --name "Dark Nebula"
+```
+carson --name photon
+Vehicle('photon' state='online' miles=52,809 software='2023.7.30' battery_level=72)
 ```
 
-To list all cars and their respective status, you can use `--list` to see them all.
+To get a sense of what is happening, you can increase verbosity and see the requests being made.
 
-```console
-> python -m carson --list
+```
+carson -v --name photon
+2023-08-31 11:54:44,615 D carson  Req 1 GET /api/1/vehicles HTTP/1.1 200 OK
+2023-08-31 11:54:44,929 D carson  Req 2 GET /api/1/vehicles/1234567890123456/vehicle_data HTTP/1.1 200 OK
+2023-08-31 11:54:44,929 I carson  Vehicle('photon' state='online' miles=52,809 software='2023.7.30' battery_level=72)
 ```
 
-To get a sense of what is happening, you can add verbose and see the requests being made.
+Further increasing the verbosity will produce more detailed output.
 
-```console
-> python -m carson -v --name "Dark Nebula"
-2020-01-01 10:46:00,943 D carson  Req# 2:  Method=GET url='https://owner-api.teslamotors.com/api/1/vehicles' status=200 duration=0:00:00.712868
-2020-01-01 10:46:00,944 I carson  Vehicle('Dark Nebula' state='asleep')
+```
+$ carson -vv --name photon
+2023-08-31 11:56:52,296 D carson  Req 1 status=200 dur=0:00:00.131960
+2023-08-31 11:56:52,297 D carson  GET https://owner-api.teslamotors.com/api/1/vehicles
+2023-08-31 11:56:52,297 D carson  < Host: owner-api.teslamotors.com
+2023-08-31 11:56:52,297 D carson  < User-Agent: carson/1.2.1+0d5c31d
+2023-08-31 11:56:52,297 D carson  < Accept: application/json
+2023-08-31 11:56:52,297 D carson  < Authorization: Bearer e***ng
+2023-08-31 11:56:52,297 D carson  < Accept-Encoding: gzip, deflate
+2023-08-31 11:56:52,297 D carson
+2023-08-31 11:56:52,297 D carson  HTTP 200 OK HttpVersion(major=1, minor=1)
+2023-08-31 11:56:52,297 D carson  > x-xss-protection: 1; mode=block
+2023-08-31 11:56:52,298 D carson  > Content-Type: application/json; charset=utf-8
+2023-08-31 11:56:52,298 D carson  > Vary: Accept
+2023-08-31 11:56:52,298 D carson  > Content-Length: 416
+2023-08-31 11:56:52,298 D carson  > x-envoy-upstream-service-time: 97
+2023-08-31 11:56:52,298 D carson  > x-envoy-upstream-cluster: owner-api
+2023-08-31 11:56:52,298 D carson  > x-frame-options: DENY
+2023-08-31 11:56:52,298 D carson  > x-content-type-options: nosniff
+2023-08-31 11:56:52,298 D carson  > strict-transport-security: max-age=31536000; includeSubDomains
+2023-08-31 11:56:52,298 D carson  > Cache-Control: no-cache, no-store, private, s-max-age=0
+2023-08-31 11:56:52,298 D carson  > Date: Thu, 31 Aug 2023 16:56:52 GMT
+2023-08-31 11:56:52,298 D carson  > Server: envoy
+2023-08-31 11:56:52,298 D carson
+2023-08-31 11:56:52,298 D carson  response={'count': 1, 'response': [{'id': 1234567890123456, 've...
+2023-08-31 11:56:52,299 D carson
+2023-08-31 11:56:52,600 D carson  Req 2 status=200 dur=0:00:00.300726
+2023-08-31 11:56:52,600 D carson  GET https://owner-api.teslamotors.com/api/1/vehicles/1234567890123456/vehicle_data
+2023-08-31 11:56:52,600 D carson  < Host: owner-api.teslamotors.com
+2023-08-31 11:56:52,600 D carson  < User-Agent: carson/1.2.1+0d5c31d
+2023-08-31 11:56:52,600 D carson  < Accept: application/json
+2023-08-31 11:56:52,600 D carson  < Authorization: Bearer e***ng
+2023-08-31 11:56:52,600 D carson  < Accept-Encoding: gzip, deflate
+2023-08-31 11:56:52,600 D carson
+2023-08-31 11:56:52,600 D carson  HTTP 200 OK HttpVersion(major=1, minor=1)
+2023-08-31 11:56:52,600 D carson  > x-xss-protection: 1; mode=block
+2023-08-31 11:56:52,600 D carson  > Content-Type: application/json; charset=utf-8
+2023-08-31 11:56:52,600 D carson  > Vary: Accept
+2023-08-31 11:56:52,601 D carson  > Content-Length: 7047
+2023-08-31 11:56:52,601 D carson  > x-envoy-upstream-service-time: 298
+2023-08-31 11:56:52,601 D carson  > x-envoy-upstream-cluster: owner-api-vehicle-data
+2023-08-31 11:56:52,601 D carson  > x-frame-options: DENY
+2023-08-31 11:56:52,601 D carson  > x-content-type-options: nosniff
+2023-08-31 11:56:52,601 D carson  > strict-transport-security: max-age=31536000; includeSubDomains
+2023-08-31 11:56:52,601 D carson  > Cache-Control: no-cache, no-store, private, s-max-age=0
+2023-08-31 11:56:52,601 D carson  > Date: Thu, 31 Aug 2023 16:56:52 GMT
+2023-08-31 11:56:52,601 D carson  > Server: envoy
+2023-08-31 11:56:52,601 D carson
+2023-08-31 11:56:52,601 D carson  response={'response': {'id': 1234567890123456, 'user_id': 123456...
+2023-08-31 11:56:52,602 D carson
+2023-08-31 11:56:52,602 I carson  Vehicle('photon' state='online' miles=52,809 software='2023.7.30' battery_level=72)
 ```
 
 From this point, you can imagine any kind of state query or command supported by Tesla's API can be queried or invoked.
 
-```console
-> python -m carson --command wake_up
-> python -m carson --command door_lock
+```
+carson --command wake_up
+carson --command door_lock
 ```
 
-> Note: In the case of waking up a car, the command line `python -m carson --command wake_up` is effectively the same as
-as the short hand `python -m carson --wake-up` command.
-
-## Streaming
-
-Tesla provides a `websocket` endpoint from which telemetry data can be streamed and stored.  To begin streaming this
-telemetry, issue the following command.
-
-```console
-> python -m carson -v --name YOUR_CAR_NAME --stream
-```
-
-`carson` will attempt to *wake-up* the car and initiate the streaming telemetry.  By default, the telemetry simply
-outputs the data to log.  A sample of that output is below.
-
-```console
-2020-01-01 14:09:30,129 D carson  Req# 1:  Method=GET url='https://owner-api.teslamotors.com/api/1/vehicles' status=200 duration=0:00:00.435516
-2020-01-01 14:09:30,752 D carson  Req# 2:  Method=POST url='https://owner-api.teslamotors.com/api/1/vehicles/01234567890123456/wake_up' status=200 duration=0:00:00.614805
-2020-01-01 14:09:30,752 D carson  Waiting for car to wake up.
-2020-01-01 14:09:37,920 D carson  Req# 9:  Method=GET url='https://owner-api.teslamotors.com/api/1/vehicles/01234567890123456/vehicle_data' status=200 duration=0:00:00.301021
-2020-01-01 14:09:37,920 I carson  Streaming iteration=1
-2020-01-01 14:09:37,961 I carson  car=Vehicle('Dark Nebula' state='online' miles=18,421 software='2019.40.50.5' battery_level=81) iteration=1  client_errors=0 vehicle_disconnects=0
-2020-01-01 14:09:38,412 D carson  {"msg_type":"data:subscribe","token":"bWlj********NmY1","value":"speed,odometer,soc,elevation,est_heading,est_lat,est_lng,power,shift_state,range,est_range,heading","tag":"0123456789"}
-2020-01-01 14:09:38,412 D carson  msg_count=1 msg={'msg_type': 'control:hello', 'connection_timeout': 0}
-2020-01-01 14:09:39,474 D carson  msg_count=2 msg={'msg_type': 'data:update', 'tag': '0123456789', 'value': '1577909378751,,18421.1,81,232,182,40.778955,-73.968583,0,,242,223,8'}
-2020-01-01 14:09:49,479 D carson  Timeout waiting for next message.
-2020-01-01 14:09:49,495 D carson  msg_count=3 msg={'msg_type': 'data:error', 'tag': '0123456789', 'value': 'disconnected', 'error_type': 'vehicle_disconnected'}
-2020-01-01 14:09:49,566 I carson  Streamer task ending due to shift state=''.
-```
+> Note: In the case of waking up a car, the command line `carson --command wake_up` is effectively
+> the same as as the short hand `carson --wake-up` command.
 
 ## Pythonic Features
 
@@ -149,7 +226,7 @@ Consider this JSON response from Tesla when getting making a call to `vehicle_da
 ```
 
 With `carson`, after you make the call to get the vehicle data, you can access the JSON response that is returned, or
-simply reference its associated JSON path on the instance of the `Vehicle` using standard Python dot-notation like this:
+simply reference its associated JSON path on the instance of `Vehicle` using standard Python dot-notation like this:
 
 ```python
 car = await my_session.vehicles('Dark Nebula')
@@ -182,21 +259,28 @@ await car.start_charge()
 
 or this command
 
-```console
-> python -m carson -v --command start_charge
+```
+> carson -v --command start_charge
 2020-01-01 11:51:44,349 D carson  Req# 1:  Method=GET url='https://owner-api.teslamotors.com/api/1/vehicles' status=200 duration=0:00:02.460019
 2020-01-01 11:51:44,350 I carson  Vehicle('Dark Nebula' state='online')
 2020-01-01 11:51:44,350 I carson  Performing 'start_charge'...
-2020-01-01 11:51:44,753 D carson  Req# 2:  Method=POST url='https://owner-api.teslamotors.com/api/1/vehicles/01234567890123456/command/charge_start' status=200 duration=0:00:00.403062
+2020-01-01 11:51:44,753 D carson  Req# 2:  Method=POST url='https://owner-api.teslamotors.com/api/1/vehicles/1234567890123456/command/charge_start' status=200 duration=0:00:00.403062
 2020-01-01 11:51:44,754 I carson  Result=
 {'carsonRequest': {'method': 'POST',
-                   'url': 'https://owner-api.teslamotors.com/api/1/vehicles/01234567890123456/command/charge_start'},
+                   'url': 'https://owner-api.teslamotors.com/api/1/vehicles/1234567890123456/command/charge_start'},
  'carsonTimestamp': '2020-01-01T17:51:44.350726',
  'error': None,
  'error_description': '',
  'response': {'reason': 'complete', 'result': True},
  'status': 200}
 ```
+
+## Examples
+
+See the `docs` directory for more examples and advanced usage:
+
+* [`docs/examples.md`](docs/examples.md)
+* [`docs/streaming.md`](docs/streaming.md)
 
 [pypi-image]: https://img.shields.io/pypi/v/carson.svg
 [pypi-url]: https://pypi.org/project/carson/
