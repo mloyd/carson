@@ -381,7 +381,7 @@ class Session:
             }
 
             # If 408 Request Timeout or anything >= 500, retry
-            if status != REQUEST_TIMEOUT or status < 500:
+            if status != REQUEST_TIMEOUT and status < 500:
                 if status >= 400:
                     raise TeslaSessionError(jdata)
                 return jdata
@@ -390,7 +390,8 @@ class Session:
                 sleep = 1.00784 * 3.141592653589793 * (attempt + 1)
                 # Hydrogen x PI.  See the movie Contact
 
-                self.logger.warning(
+                func = self.logger.debug if status == REQUEST_TIMEOUT else self.logger.warning
+                func(
                     'Received HTTP=%d on attempt %d of %d.  Waiting %s before trying again.',
                     status,
                     attempt,

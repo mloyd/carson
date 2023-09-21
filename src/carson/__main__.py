@@ -97,7 +97,7 @@ async def start(args):
             return
 
         if car.state != 'online' and args.wake:
-            logging.debug('Waking up car...')
+            logging.info('Waking up car...')
             await car.wake_up()
 
         if args.stream:
